@@ -1,0 +1,11 @@
+[submodule "Theano"]
+	path = Theano
+	url = git://github.com/Theano/Theano.git
+[submodule "skaae"]
+	path = skaae
+	url = https://github.com/skaae/nntools
+	branch = pentree_recurrent
+[submodule "nntools"]
+	path = nntools
+	url = https://github.com/craffel/nntools.git
+	branch = recurrent
