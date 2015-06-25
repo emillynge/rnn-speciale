@@ -9,3 +9,6 @@
 	path = nntools
 	url = https://github.com/craffel/nntools.git
 	branch = recurrent
+[submodule "pycuda"]
+	path = pycuda
+	url = http://git.tiker.net/trees/pycuda.git
