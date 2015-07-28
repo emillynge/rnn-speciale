@@ -61,7 +61,7 @@ def init_manager():
     daemon = Pyro4.Daemon(port=QSUBMANAGER_PORT)
     manager = QsubManager()
     daemon.register(manager, "qsub.manager")
-    daemon.requestLoop(loopCondition=manager.running)
+    daemon.requestLoop(loopCondition=manager.is_alive)
 
 class QsubManager(object):
     def __init__(self):
@@ -81,6 +81,9 @@ class QsubManager(object):
                 module_dict[module] = list()
             module_dict[module] = version
         return module_dict
+
+    def is_alive(self):
+        return self.running
 
     def shutdown(self):
         print 'shutting down qsub manager'
