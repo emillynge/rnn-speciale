@@ -95,12 +95,16 @@ class QsubClient(object):
 
     def isup_manager(self):
         (i, o, e) = self.ssh.exec_command("cd  %s; %s QsubTools.py isup manager" % (WORKDIR, SERVER_PYTHON_BIN))
-        if "False" in o.readlines():
-            logging.debug("Manager up")
+        msg = o.readlines()
+        self.logger.debug(msg)
+        if "False\n" in msg:
+            self.logger.debug("Manager down")
             return False
-        else:
-            logging.debug("Manager down")
+        elif "False\n" in msg:
+            self.logger.debug("Manager up")
             return True
+        else:
+            raise  Exception(e.readlines())
 
     def init_manager(self, retries=0):
         self.ssh.exec_command("cd  %s; %s QsubTools.py init manager" % (WORKDIR, SERVER_PYTHON_BIN), timeout=4)
@@ -123,9 +127,10 @@ def init_manager():
 
 def isup_manager():
     manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
-    if manager.is_alive():
-        print True
-    else:
+    try:
+        if manager.is_alive():
+            print True
+    except pyro_errors.CommunicationError:
         print False
 
 class QsubManager(object):
