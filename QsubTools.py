@@ -17,6 +17,8 @@ from sshtunnel import  SSHTunnelForwarder
 import paramiko
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
+import logging
+
 Pyro4.config.COMMTIMEOUT = 5.0 # without this daemon.close() hangs
 
 from collections import namedtuple
@@ -26,18 +28,42 @@ class InvalidQsubArguments(Exception):
 HPC_Time = namedtuple("Time", ['h', 'm', 's'])
 HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'vmem'])
 
+def create_logger():
+    # create logger with 'spam_application'
+    logger = logging.getLogger('Qsub')
+    logger.setLevel(logging.DEBUG)
+    # create file handler which logs even debug messages
+    fh = logging.FileHandler('qsubs/logs/test.log')
+    fh.setLevel(logging.DEBUG)
+    # create console handler with a higher log level
+    ch = logging.StreamHandler()
+    ch.setLevel(logging.DEBUG)
+    # create formatter and add it to the handlers
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    fh.setFormatter(formatter)
+    ch.setFormatter(formatter)
+    # add the handlers to the logger
+    logger.addHandler(fh)
+    logger.addHandler(ch)
+    return logger
+
+logger = create_logger()
 
 def make_tunnel(port, server_host="127.0.0.1"):
     server = SSHTunnelForwarder(
         (SSH_HOST, SSH_PORT),
         ssh_username=SSH_USERNAME,
         ssh_private_key=SSH_PRIVATE_KEY,
-        remote_bind_address=(server_host, port))
+        remote_bind_address=(server_host, port),
+        logger=logger)
+    server.start()
     return server, server.local_bind_port
 
 class QsubClient(object):
     def __init__(self):
-        self.manager_client_port, self.manager_ssh_server = make_tunnel(5000)
+        self.logger = logger
+        self.manager_ssh_server, self.manager_client_port = make_tunnel(5000)
+        self.manager = self.get_or_start_manager()
 
     def get_or_start_manager(self, retries=0):
         if retries != 0:
@@ -46,9 +72,11 @@ class QsubClient(object):
             ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, key_filename=SSH_PRIVATE_KEY)
             ssh.exec_command()
 
-        manager = Pyro4.Proxy("PYRO:qsub.manager:%d", self.manager_client_port)
+        manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:%d" % self.manager_client_port)
         try:
-            manager.ping()
+            if manager.is_alive():
+                self.logger.info('Successfully connected to Qsub Manager')
+                print "Alive!"
         except pyro_errors.CommunicationError as e:
             if retries > 2:
                 raise e
@@ -65,12 +93,12 @@ def init_manager():
 
 class QsubManager(object):
     def __init__(self):
-        available_modules = self.available_modules()
+        self.available_modules = self.get_available_modules()
         active_qsubs = dict()
         self.running = True
 
     @staticmethod
-    def available_modules():
+    def get_available_modules():
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)
