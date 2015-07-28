@@ -26,8 +26,7 @@ from collections import namedtuple
 class InvalidQsubArguments(Exception):
     pass
 
-HPC_Time = namedtuple("Time", ['h', 'm', 's'])
-HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'vmem'])
+
 
 def create_logger():
     # create logger with 'spam_application'
@@ -74,17 +73,26 @@ def make_tunnel(port, server_host="127.0.0.1"):
     server.start()
     return server, server.local_bind_port
 
+HPC_Time = namedtuple("Time", ['h', 'm', 's'])
+HPC_Time.__new__.__defaults__ = (0, 0, 0)
+HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'pvmem', 'vmem'])
+HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
+
 class QsubClient(object):
     def __init__(self):
-        self.logger = logger
-        self.ssh = self.setup_ssh_server()
         self.max_retry = 5
+        self.logger = logger
 
+        self.ssh = self.setup_ssh_server()
         if not self.isup_manager():
             self.init_manager()
-
         self.manager_ssh_server, self.manager_client_port = make_tunnel(5000)
         self.manager = self.get_manager()
+        self.manager.is_alive()
+        self.logger.debug("Succesfully connected to Qsub manager on local port %d" % self.manager_client_port)
+
+    def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules={}):
+        return QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
 
     def setup_ssh_server(self):
         import paramiko
@@ -100,11 +108,11 @@ class QsubClient(object):
         if "False\n" in msg:
             self.logger.debug("Manager down")
             return False
-        elif "False\n" in msg:
+        elif "True\n" in msg:
             self.logger.debug("Manager up")
             return True
         else:
-            raise  Exception(e.readlines())
+            raise Exception(e.readlines())
 
     def init_manager(self, retries=0):
         self.ssh.exec_command("cd  %s; %s QsubTools.py init manager" % (WORKDIR, SERVER_PYTHON_BIN), timeout=4)
@@ -135,9 +143,12 @@ def isup_manager():
 
 class QsubManager(object):
     def __init__(self):
-        self.available_modules = self.get_available_modules()
+        self._available_modules = self.get_available_modules()
         active_qsubs = dict()
         self.running = True
+
+    def available_modules(self):
+        return self._available_modules
 
     @staticmethod
     def get_available_modules():
@@ -161,31 +172,43 @@ class QsubManager(object):
 
 
 class QsubGenerator(object):
-    def __init__(self, jobname, available_modules, hours=0, minutes=0, seconds=0, nodes=1, processors_per_node=1, gpus=0,
-                 memory_per_process=None, memory_total=None, base_dir=WORKDIR, rel_dir=None, additional_modules={}):
-        self.available_modules = available_modules
-        if not any([hours, minutes, seconds]):
-            raise InvalidQsubArguments('No wall clock time assigned to job: %d:%d:%d' % (hours, minutes, seconds))
+    def __init__(self, qsub_manager, package, module, wallclock, resources, rel_dir, additional_modules):
+        assert isinstance(wallclock, HPC_Time)
+        assert isinstance(resources, HPC_resources)
 
-        if nodes < 1 or processors_per_node < 1:
-            raise InvalidQsubArguments('A job must have at least 1 node and 1 processor')
-
-        self.resources = HPC_resources(nodes=nodes, ppn=processors_per_node, gpus=gpus, pvmem=memory_per_process,
-                                       vmem=memory_total)
-        self.wc_time = HPC_Time(h=hours, m=minutes, s=seconds)
-        self.base_dir = base_dir
-        self.rel_dir = rel_dir
-        if not os.path.exists(self.work_dir):
-            raise InvalidQsubArguments("Work directory %s doesn't exist." % self.work_dir)
-
+        self.available_modules = qsub_manager.available_modules()
+        self.resources = None
+        self.wc_time = None
         self.modules = BASEMODULES
+        self.base_dir = WORKDIR
+        self.rel_dir = rel_dir
+        self.package = package
+        self.module = module
+
+        self.resources = resources
+        self.wc_time = wallclock
+    #
+    # def set_parameters(self, hours=0, minutes=0, seconds=0, nodes=1, processors_per_node=1, gpus=0,
+    #                    memory_per_process=None, memory_total=None, ):
+    #     if not any([hours, minutes, seconds]):
+    #         raise InvalidQsubArguments('No wall clock time assigned to job: %d:%d:%d' % (hours, minutes, seconds))
+    #
+    #     if nodes < 1 or processors_per_node < 1:
+    #         raise InvalidQsubArguments('A job must have at least 1 node and 1 processor')
+    #
+    #     self.resources = HPC_resources(nodes=nodes, ppn=processors_per_node, gpus=gpus, pvmem=memory_per_process,
+    #                                    vmem=memory_total)
+    #     self.wc_time = HPC_Time(h=hours, m=minutes, s=seconds)
+    #
+    #     if not os.path.exists(self.work_dir):
+    #         raise InvalidQsubArguments("Work directory %s doesn't exist." % self.work_dir)
+
         self.modules.update(additional_modules)
         self.check_modules()
 
     @property
     def work_dir(self):
         return self.base_dir + '/' + self.rel_dir
-
 
     def check_modules(self):
         for (module, version) in self.modules.iteritems():
@@ -194,7 +217,7 @@ class QsubGenerator(object):
             if version and version not in self.available_modules[module]:
                 raise InvalidQsubArguments("Required module version %s is not available for module %" % (version, module))
 
-    def write_submit(self):
+    def qsub(self):
         pass
 
     def submit(self):
