@@ -33,7 +33,7 @@ def create_logger():
     logger = logging.getLogger('Qsub')
     logger.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
-    fh = logging.FileHandler('qsubs/logs/test.log')
+    fh = logging.FileHandler('logs/qsubs.log')
     fh.setLevel(logging.DEBUG)
     # create console handler with a higher log level
     ch = logging.StreamHandler()
