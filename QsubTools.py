@@ -1,6 +1,6 @@
 __author__ = 'emil'
 USER = "s082768@student.dtu.dk"
-WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/nntools"
+WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale"
 LOGDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/qsub/logs"
 QSUBMANAGER_PORT = 5000
 SSH_USERNAME = "s082768"
@@ -13,11 +13,12 @@ from subprocess import Popen, PIPE
 FNULL = open('/dev/null', 'w')
 import re
 import os
-from sshtunnel import  SSHTunnelForwarder
+
 import paramiko
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 import logging
+import sys
 
 Pyro4.config.COMMTIMEOUT = 5.0 # without this daemon.close() hangs
 
@@ -50,6 +51,7 @@ def create_logger():
 logger = create_logger()
 
 def make_tunnel(port, server_host="127.0.0.1"):
+    from sshtunnel import SSHTunnelForwarder
     server = SSHTunnelForwarder(
         (SSH_HOST, SSH_PORT),
         ssh_username=SSH_USERNAME,
@@ -162,10 +164,9 @@ class QsubGenerator(object):
     def read_logs(self):
         pass
 
-
-
-
-
-
-
-
+if __name__ == "__main__":
+    parameters  = sys.argv[1:]
+    print parameters
+    if parameters[0] == 'init':
+        if parameters[1] == 'manager':
+            init_manager()
