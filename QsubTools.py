@@ -13,8 +13,6 @@ from subprocess import Popen, PIPE
 FNULL = open('/dev/null', 'w')
 import re
 import os
-
-import paramiko
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 import logging
@@ -69,6 +67,7 @@ class QsubClient(object):
 
     def get_or_start_manager(self, retries=0):
         if retries != 0:
+            import paramiko
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
             ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, key_filename=SSH_PRIVATE_KEY)
@@ -84,8 +83,6 @@ class QsubClient(object):
                 raise e
             else:
                 return self.get_or_start_manager(retries=retries+1)
-
-
 
 def init_manager():
     daemon = Pyro4.Daemon(port=QSUBMANAGER_PORT)
