@@ -74,7 +74,7 @@ class QsubManager(object):
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)
-        module_list = re.findall('([^ \t])/([^ \t])[ \t\(]', lines)
+        module_list = re.findall('([^ \t])/([^ \t])[ \t\(]', '\n'.join(lines))
         module_dict = dict()
         for (module, version) in module_list:
             if module not in module_dict:
