@@ -116,6 +116,7 @@ class QsubClient(object):
 
     def init_manager(self, retries=0):
         self.ssh.exec_command("cd  %s; %s QsubTools.py init manager" % (WORKDIR, SERVER_PYTHON_BIN), timeout=4)
+        sleep(4)
         if not self.isup_manager():
             self.logger.info("Manager still not up after init")
             if retries > self.max_retry:
@@ -156,6 +157,8 @@ class QsubManager(object):
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)
         module_list = re.findall('([^ \t])/([^ \t])[ \t\(]', '\n'.join(lines))
+        logger.debug(lines)
+        logger.debug(module_list)
         module_dict = dict()
         for (module, version) in module_list:
             if module not in module_dict:
