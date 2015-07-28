@@ -76,12 +76,12 @@ class QsubClient(object):
         try:
             if manager.is_alive():
                 self.logger.info('Successfully connected to Qsub Manager')
-                print "Alive!"
+                return manager
         except pyro_errors.CommunicationError as e:
             if retries > 2:
                 raise e
             else:
-                self.get_or_start_manager(retries=retries+1)
+                return self.get_or_start_manager(retries=retries+1)
 
 
 
@@ -89,6 +89,7 @@ def init_manager():
     daemon = Pyro4.Daemon(port=QSUBMANAGER_PORT)
     manager = QsubManager()
     daemon.register(manager, "qsub.manager")
+    print "putting manager in request loop"
     daemon.requestLoop(loopCondition=manager.is_alive)
 
 class QsubManager(object):
