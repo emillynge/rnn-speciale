@@ -70,7 +70,7 @@ class QsubManager(object):
         self.running = True
 
     @staticmethod
-    def available_modules(self):
+    def available_modules():
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)
