@@ -2,6 +2,7 @@ __author__ = 'emil'
 USER = "s082768@student.dtu.dk"
 WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale"
 LOGDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/qsub/logs"
+SERVER_PYTHON_BIN = "/usr/local/gbar/apps/python/2.7.1/bin/python"
 QSUBMANAGER_PORT = 5000
 SSH_USERNAME = "s082768"
 SSH_PRIVATE_KEY = "/home/emil/.ssh/id_rsa"
@@ -17,6 +18,7 @@ import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 import logging
 import sys
+from time import sleep
 
 Pyro4.config.COMMTIMEOUT = 5.0 # without this daemon.close() hangs
 
@@ -47,6 +49,18 @@ def create_logger():
     return logger
 
 logger = create_logger()
+class DummyLogger(object):
+    def debug(self, *args):
+        pass
+
+    def info(self, *args):
+        pass
+
+    def warning(self, *args):
+        pass
+
+    def error(self, *args):
+        pass
 
 def make_tunnel(port, server_host="127.0.0.1"):
     from sshtunnel import SSHTunnelForwarder
@@ -55,34 +69,50 @@ def make_tunnel(port, server_host="127.0.0.1"):
         ssh_username=SSH_USERNAME,
         ssh_private_key=SSH_PRIVATE_KEY,
         remote_bind_address=(server_host, port),
-        logger=logger)
+        logger=DummyLogger(),
+        raise_exception_if_any_forwarder_have_a_problem=False)
     server.start()
     return server, server.local_bind_port
 
 class QsubClient(object):
     def __init__(self):
         self.logger = logger
+        self.ssh = self.setup_ssh_server()
+        self.max_retry = 5
+
+        if not self.isup_manager():
+            self.init_manager()
+
         self.manager_ssh_server, self.manager_client_port = make_tunnel(5000)
-        self.manager = self.get_or_start_manager()
+        self.manager = self.get_manager()
 
-    def get_or_start_manager(self, retries=0):
-        if retries != 0:
-            import paramiko
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, key_filename=SSH_PRIVATE_KEY)
-            ssh.exec_command()
+    def setup_ssh_server(self):
+        import paramiko
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, key_filename=SSH_PRIVATE_KEY)
+        return ssh
 
-        manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:%d" % self.manager_client_port)
-        try:
-            if manager.is_alive():
-                self.logger.info('Successfully connected to Qsub Manager')
-                return manager
-        except pyro_errors.CommunicationError as e:
-            if retries > 2:
-                raise e
+    def isup_manager(self):
+        (i, o, e) = self.ssh.exec_command("cd  %s; %s QsubTools.py isup manager" % (WORKDIR, SERVER_PYTHON_BIN))
+        if "False" in o.readlines():
+            logging.debug("Manager up")
+            return False
+        else:
+            logging.debug("Manager down")
+            return True
+
+    def init_manager(self, retries=0):
+        self.ssh.exec_command("cd  %s; %s QsubTools.py init manager" % (WORKDIR, SERVER_PYTHON_BIN), timeout=4)
+        if not self.isup_manager():
+            self.logger.info("Manager still not up after init")
+            if retries > self.max_retry:
+                self.logger.error("Giving up on initializing manager after %d tries" % self.max_retry)
             else:
-                return self.get_or_start_manager(retries=retries+1)
+                self.init_manager(retries=retries+1)
+
+    def get_manager(self, retries=0):
+        return Pyro4.Proxy("PYRO:qsub.manager@localhost:%d" % self.manager_client_port)
 
 def init_manager():
     daemon = Pyro4.Daemon(port=QSUBMANAGER_PORT)
@@ -90,6 +120,13 @@ def init_manager():
     daemon.register(manager, "qsub.manager")
     print "putting manager in request loop"
     daemon.requestLoop(loopCondition=manager.is_alive)
+
+def isup_manager():
+    manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
+    if manager.is_alive():
+        print True
+    else:
+        print False
 
 class QsubManager(object):
     def __init__(self):
@@ -167,3 +204,6 @@ if __name__ == "__main__":
     if parameters[0] == 'init':
         if parameters[1] == 'manager':
             init_manager()
+    elif parameters[0] == 'isup':
+        if parameters[1] == 'manager':
+            isup_manager()
