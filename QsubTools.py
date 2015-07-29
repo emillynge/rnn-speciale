@@ -30,9 +30,9 @@ class InvalidQsubArguments(Exception):
     pass
 
 
-def create_logger():
+def create_logger(loggername="Qsub"):
     # create logger with 'spam_application'
-    _logger = logging.getLogger('Qsub')
+    _logger = logging.getLogger(loggername)
     _logger.setLevel(logging.DEBUG)
     # create file handler which logs even debug messages
     fh = logging.FileHandler('logs/qsubs.log')
@@ -88,16 +88,17 @@ HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
 
 
 def init_manager():
-    logger.debug("Initializing manager")
+    _logger = create_logger('init')
+    _logger.debug("Initializing manager")
     try:
         daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
-        logger.debug("Init Manager")
+        _logger.debug("Init Manager")
         manager = QsubManager()
         daemon.register(manager, "qsub.manager")
-        logger.info("putting manager in request loop")
+        _logger.info("putting manager in request loop")
         daemon.requestLoop(loopCondition=manager.is_alive)
     except Exception as e:
-        logger.error(e.message)
+        _logger.error(e.message, exc_info=True)
         raise e
 
 
