@@ -18,6 +18,7 @@ import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 import logging
 import sys
+from copy import copy
 from time import sleep
 
 Pyro4.config.COMMTIMEOUT = 5.0 # without this daemon.close() hangs
@@ -91,7 +92,7 @@ class QsubClient(object):
         self.manager.is_alive()
         self.logger.debug("Succesfully connected to Qsub manager on local port %d" % self.manager_client_port)
 
-    def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules={}):
+    def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules=None):
         return QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
 
     def setup_ssh_server(self):
@@ -182,7 +183,7 @@ class QsubGenerator(object):
         self.available_modules = qsub_manager.available_modules()
         self.resources = None
         self.wc_time = None
-        self.modules = BASEMODULES
+        self.modules = copy(BASEMODULES)
         self.base_dir = WORKDIR
         self.rel_dir = rel_dir
         self.package = package
@@ -205,8 +206,8 @@ class QsubGenerator(object):
     #
     #     if not os.path.exists(self.work_dir):
     #         raise InvalidQsubArguments("Work directory %s doesn't exist." % self.work_dir)
-
-        self.modules.update(additional_modules)
+        if additional_modules:
+            self.modules.update(additional_modules)
         self.check_modules()
 
     @property
