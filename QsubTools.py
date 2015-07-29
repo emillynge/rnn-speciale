@@ -316,13 +316,13 @@ class QsubGenerator(object):
             self.logger.debug("module {0}, version {1} is available".format(module, version if version else "default"))
 
     def get_instance_class(self):
-        sub_id = self.manager.request_submission()
         manager = self.manager
         ss = self.submission_script
+
         class QsubInstance(BaseQsubInstance):
             @staticmethod
-            def set_submission_script():
-                return ss
+            def set_manager():
+                return manager
 
             @staticmethod
             def set_submission_script():
@@ -368,7 +368,6 @@ class SubmissionScript(object):
     def append_PBS(self, flag, line):
         self.lines.append(self.make_PBS(flag, line))
 
-
     def name(self, name):
         self.append_PBS('N ', name)
 
@@ -403,9 +402,10 @@ class BaseQsubInstance(object):
         (self.sub_id, self.logfile) = self.qsub_manager.request_submission()
 
     def stage_submission(self):
-        exe = 'python -c "from {0} import {1}; from QsubTools import QsubExecutor; QsubExecutor({1}, {2}, {3}'.format(
+        exe = """python -c "from {0} import {1}; from QsubTools import QsubExecutor; QsubExecutor({1}, {2}, '{3}')" """.format(
             self.qsub_generator.package, self.qsub_generator.module, self.sub_id, self.qsub_manager.get_ip())
-        self.submission_script.generate(exe, self.logfile)
+        script = self.submission_script.generate(exe, self.logfile)
+        self.qsub_manager.stage_submission(self.sub_id, script)
 
     @staticmethod
     def set_manager():
@@ -419,9 +419,14 @@ class BaseQsubInstance(object):
     def set_qsub_generator():
         return QsubGenerator()
 
+
 class QsubExecutor(object):
     def __init__(self, cls, sub_id, manager_ip):
         self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000")
+        if self.manager.is_alive():
+            print "manager found!"
+        print cls
+        print sub_id
 
 
 
