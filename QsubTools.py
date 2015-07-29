@@ -120,7 +120,7 @@ def isup_manager():
 
 class QsubClient(object):
     def __init__(self, restart_manager=False):
-        self.max_retry = 5
+        self.max_retry = 3
         self.logger = logger
 
         self.ssh = self.setup_ssh_server()
@@ -141,16 +141,15 @@ class QsubClient(object):
 
     @staticmethod
     def setup_ssh_server():
-        import paramiko
-
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USERNAME, key_filename=SSH_PRIVATE_KEY)
-        return ssh
+        s = open_ssh_session_to_server()
+        s.sendline('cd {0}'.format(WORKDIR))
+        s.prompt()
+        return s
 
     def isup_manager(self):
-        (i, o, e) = self.ssh.exec_command("cd  {0}; {1} QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
-        msg = o.readlines()
+        self.ssh.sendline("QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
+        self.ssh.prompt()
+        msg = self.ssh.before()
         self.logger.debug(msg)
         if "False\n" in msg:
             self.logger.debug("Manager down")
@@ -159,11 +158,12 @@ class QsubClient(object):
             self.logger.debug("Manager up")
             return True
         else:
-            raise Exception("".join(e.readlines()))
+            raise Exception(msg)
 
     def init_manager(self, retries=0):
         timeout = retries * 2
-        self.ssh.exec_command("cd  {0}; {1} QsubTools.py init manager".format(WORKDIR, SERVER_PYTHON_BIN), timeout=timeout)
+        self.ssh.sendline("nohup python QsubTools.py init manager &")
+        self.ssh.prompt()
         sleep(timeout)
         if not self.isup_manager():
             self.logger.info("Manager still not up after init")
