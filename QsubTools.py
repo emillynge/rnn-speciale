@@ -1,3 +1,5 @@
+import os
+
 __author__ = 'emil'
 USER = "s082768@student.dtu.dk"
 WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale"
@@ -122,7 +124,7 @@ def isup_manager():
 class QsubClient(object):
     def __init__(self, restart_manager=False):
         self.max_retry = 3
-        self.logger = logger
+        self.logger = create_logger("Client")
 
         self.ssh = self.setup_ssh_server()
         hot_start = self.isup_manager()
@@ -148,14 +150,13 @@ class QsubClient(object):
         return s
 
     def isup_manager(self):
-        self.ssh.sendline("QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
+        self.ssh.sendline("python QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
         self.ssh.prompt()
-        msg = self.ssh.before()
-        self.logger.debug(msg)
-        if "False\n" in msg:
+        msg = self.ssh.before
+        if "False" in msg:
             self.logger.debug("Manager down")
             return False
-        elif "True\n" in msg:
+        elif "True" in msg:
             self.logger.debug("Manager up")
             return True
         else:
@@ -233,27 +234,38 @@ class QsubGenerator(object):
         self.rel_dir = rel_dir
         self.package = package
         self.module = module
-        self.manager_ip = qsub_manager.get_ip
+        self.manager_ip = qsub_manager.get_ip()
         self.resources = resources
         self.wc_time = wallclock
-        #
-        # def set_parameters(self, hours=0, minutes=0, seconds=0, nodes=1, processors_per_node=1, gpus=0,
-        # memory_per_process=None, memory_total=None, ):
-        # if not any([hours, minutes, seconds]):
-        #         raise InvalidQsubArguments('No wall clock time assigned to job: {0}:{1}:{2}' % (hours, minutes, seconds))
-        #
-        #     if nodes < 1 or processors_per_node < 1:
-        #         raise InvalidQsubArguments('A job must have at least 1 node and 1 processor')
-        #
-        #     self.resources = HPC_resources(nodes=nodes, ppn=processors_per_node, gpus=gpus, pvmem=memory_per_process,
-        #                                    vmem=memory_total)
-        #     self.wc_time = HPC_Time(h=hours, m=minutes, s=seconds)
-        #
-        #     if not os.path.exists(self.work_dir):
-        #         raise InvalidQsubArguments("Work directory {0} doesn't exist.".format(self.work_dir)
-        if additional_modules:
-            self.modules.update(additional_modules)
-        self.check_modules()
+        self.logger = create_logger('Generator')
+        self.manager = qsub_manager
+
+        try:
+            if resources.nodes < 1 or resources.ppn < 1:
+                raise InvalidQsubArguments('A job must have at least 1 node and 1 processor')
+
+            if not any(wallclock):
+                raise InvalidQsubArguments('No wall clock time assigned to job: {0}:{1}:{2}'.format(wallclock))
+
+            if not os.path.exists(self.work_dir):
+                raise InvalidQsubArguments("Work directory {0} doesn't exist.".format(self.work_dir))
+
+            if additional_modules:
+                self.modules.update(additional_modules)
+            self.check_modules()
+        except InvalidQsubArguments as e:
+            self.logger.error('Invalid parameters passed to Qsub', exc_info=True)
+            #raise e
+
+        self.submission_script = self.make_submission_script()
+
+    def make_submission_script(self):
+        ss = SubmissionScript(self.work_dir, self.modules)
+        ss.resources(self.resources)
+        ss.wallclock(self.wc_time)
+        ss.name('{0}.{1}'.format(self.package, self.module))
+        ss.mail(SSH_USERNAME + '@student.dtu.dk')
+        return ss
 
     @property
     def work_dir(self):
@@ -266,15 +278,73 @@ class QsubGenerator(object):
             if version and version not in self.available_modules[module]:
                 raise InvalidQsubArguments("Required module version {0} is not available for module {1}".format(version,
                                                                                                               module))
+            self.logger.debug("module {0}, version {1} is available".format(module, version if version else "default"))
 
-    def qsub(self):
-        pass
 
-    def submit(self):
-        pass
+class SubmissionScript(object):
+    def __init__(self, work_dir, modules):
+        self.lines = ["#!/bin/sh"]
+        self.wd = work_dir
+        self.modules = modules
 
-    def read_logs(self):
-        pass
+    def generate(self, execute_commands, log_file):
+        script = '\n'.join(self.lines) + '\n'
+        script += self.make_PBS('e', log_file + ".e") + '\n'
+        script += self.make_PBS('o', log_file + ".o") + '\n'
+
+        for module_name, version in self.modules.iteritems():
+            script += 'module load ' + module_name
+            if version:
+                script += '/' + version
+            script += '\n'
+
+        script += 'cd {0}\n'.format(self.wd)
+
+
+        if isinstance(execute_commands, list):
+            script += '\n'.join(execute_commands)
+        else:
+            script += execute_commands
+        return script
+
+    def make_PBS(self, flag, line):
+        assert isinstance(line, (str, unicode))
+        return "#PBS -" + flag.strip(' ') + ' ' + line
+
+    def append_PBS(self, flag, line):
+        self.lines.append(self.make_PBS(flag, line))
+
+
+    def name(self, name):
+        self.append_PBS('N ', name)
+
+    def mail(self, mail_address):
+        self.append_PBS('m', mail_address)
+
+    def resources(self, resources):
+        assert isinstance(resources, HPC_resources)
+        self.append_PBS('l', 'nodes={1}:ppn={0}'.format(resources.ppn, resources.nodes))
+
+        if resources.gpus:
+            self.append_PBS('l', 'gpus={0}'.format(resources.gpus))
+
+        if resources.pvmem:
+            self.append_PBS('l', 'pvmem={0}'.format(resources.pvmem))
+
+        if resources.vmem:
+            self.append_PBS('l', 'vmem={0}'.format(resources.vmem))
+
+    def wallclock(self, wallclock):
+        assert isinstance(wallclock, HPC_Time)
+        self.append_PBS("l", "walltime={0}:{1}:{2}".format(wallclock.h, wallclock.m, wallclock.s))
+
+
+
+class QsubExecutor(object):
+    def __init__(self, cls, sub_id, manager_ip):
+        self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000")
+
+
 
 
 if __name__ == "__main__":
