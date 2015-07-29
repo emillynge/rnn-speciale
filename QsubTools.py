@@ -188,6 +188,7 @@ class QsubManager(object):
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)[0]
+        logger.debug(lines)
         modules = re.split('[ \t\n]+', lines)[:-1]
         module_ver_list = [m.strip('(default)').split('/') for m in modules]
 
