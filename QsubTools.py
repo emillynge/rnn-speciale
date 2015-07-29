@@ -87,6 +87,23 @@ HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'pvmem', 'vmem']
 HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
 
 
+def init_manager():
+    daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
+    manager = QsubManager()
+    daemon.register(manager, "qsub.manager")
+    print "putting manager in request loop"
+    daemon.requestLoop(loopCondition=manager.is_alive)
+
+
+def isup_manager():
+    manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
+    try:
+        if manager.is_alive():
+            print True
+    except pyro_errors.CommunicationError:
+        print False
+
+
 class QsubClient(object):
     def __init__(self):
         self.max_retry = 5
@@ -139,23 +156,6 @@ class QsubClient(object):
         return Pyro4.Proxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port))
 
 
-def init_manager():
-    daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
-    manager = QsubManager()
-    daemon.register(manager, "qsub.manager")
-    print "putting manager in request loop"
-    daemon.requestLoop(loopCondition=manager.is_alive)
-
-
-def isup_manager():
-    manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
-    try:
-        if manager.is_alive():
-            print True
-    except pyro_errors.CommunicationError:
-        print False
-
-
 class QsubManager(object):
     def __init__(self):
         self._available_modules = self.get_available_modules()
@@ -168,7 +168,7 @@ class QsubManager(object):
     def get_available_modules():
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
-                           p.communicate()[1], re.DOTALL)
+                           "\n".join(p.communicate()), re.DOTALL)
         module_list = re.findall('([^ \t])/([^ \t])[ \t\(]', '\n'.join(lines))
         logger.debug(lines)
         logger.debug(module_list)
@@ -194,7 +194,7 @@ class QsubGenerator(object):
     def __init__(self, qsub_manager, package, module, wallclock, resources, rel_dir, additional_modules):
         assert isinstance(wallclock, HPC_Time)
         assert isinstance(resources, HPC_resources)
-        assert isinstance(qsub_manager, QsubManager)
+        assert isinstance(qsub_manager, (QsubManager, Pyro4.Proxy))
 
         self.available_modules = qsub_manager.available_modules()
         self.resources = None
