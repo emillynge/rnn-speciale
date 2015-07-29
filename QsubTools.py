@@ -88,10 +88,12 @@ HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
 
 
 def init_manager():
+    logger.debug("Creating Daemon")
     daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
+    logger.debug("Init Manager")
     manager = QsubManager()
     daemon.register(manager, "qsub.manager")
-    print "putting manager in request loop"
+    logger.info("putting manager in request loop")
     daemon.requestLoop(loopCondition=manager.is_alive)
 
 
@@ -105,17 +107,22 @@ def isup_manager():
 
 
 class QsubClient(object):
-    def __init__(self):
+    def __init__(self, restart_manager=False):
         self.max_retry = 5
         self.logger = logger
 
         self.ssh = self.setup_ssh_server()
-        if not self.isup_manager():
+        hot_start = self.isup_manager()
+        if not hot_start:
             self.init_manager()
+
         self.manager_ssh_server, self.manager_client_port = make_tunnel(5000)
         self.manager = self.get_manager()
         self.manager.is_alive()
         self.logger.debug("Successfully connected to Qsub manager on local port {0}".format(self.manager_client_port))
+
+        if restart_manager and hot_start:
+            self.restart_manager()
 
     def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules=None):
         return QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
@@ -143,8 +150,9 @@ class QsubClient(object):
             raise Exception("".join(e.readlines()))
 
     def init_manager(self, retries=0):
-        self.ssh.exec_command("cd  {0}; {1} QsubTools.py init manager".format(WORKDIR, SERVER_PYTHON_BIN), timeout=4)
-        sleep(4)
+        timeout = retries * 2
+        self.ssh.exec_command("cd  {0}; {1} QsubTools.py init manager".format(WORKDIR, SERVER_PYTHON_BIN), timeout=timeout)
+        sleep(timeout)
         if not self.isup_manager():
             self.logger.info("Manager still not up after init")
             if retries > self.max_retry:
@@ -154,6 +162,12 @@ class QsubClient(object):
 
     def get_manager(self):
         return Pyro4.Proxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port))
+
+    def restart_manager(self):
+        self.manager.shutdown()
+        sleep(Pyro4.config.COMMTIMEOUT)
+        self.init_manager()
+        self.logger.info("Manager restarted")
 
 
 class QsubManager(object):
