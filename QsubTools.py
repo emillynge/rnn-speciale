@@ -16,6 +16,7 @@ BASE_MODULES = {"python": '', "cuda": '', "boost": ''}
 from subprocess import Popen, PIPE
 
 FNULL = open('/dev/null', 'w')
+from threading import Thread
 import re
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
@@ -100,17 +101,24 @@ HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
 def init_manager():
     _logger = create_logger('init')
     _logger.debug("Initializing manager")
-    try:
-        daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
-        _logger.debug("Init Manager")
-        manager = QsubManager()
-        daemon.register(manager, "qsub.manager")
-        _logger.info("putting manager in request loop")
-        daemon.requestLoop(loopCondition=manager.is_alive)
-    except Exception as e:
-        _logger.error(e.message, exc_info=True)
-        raise e
+    my_ip = QsubManager.get_ip()
+    _logger.debug("Init Manager")
+    manager = QsubManager()
+    def init_manager_on_interface(interface, port):
+        try:
+            daemon = Pyro4.Daemon(port=port, host=interface)
+            daemon.register(manager, "qsub.manager")
+            _logger.info("putting manager in request loop")
+            daemon.requestLoop(loopCondition=manager.is_alive)
+        except Exception as e:
+            _logger.error(e.message, exc_info=True)
+            raise e
 
+    localhost = Thread(target="init_manager_on_interface", args=('localhost', QSUB_MANAGER_PORT))
+    localhost.start()
+
+    exposed = Thread(target="init_manager_on_interface", args=(my_ip, QSUB_MANAGER_PORT + 1))
+    exposed.start()
 
 def isup_manager():
     manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
@@ -120,6 +128,9 @@ def isup_manager():
     except pyro_errors.CommunicationError:
         print False
 
+def stop_manager():
+    manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
+    manager.shutdown()
 
 class QsubClient(object):
     def __init__(self, restart_manager=False):
@@ -441,3 +452,6 @@ if __name__ == "__main__":
     elif parameters[0] == 'isup':
         if parameters[1] == 'manager':
             isup_manager()
+    elif parameters[0] == 'stop':
+        if parameters[1] == 'manager':
+            stop_manager()
