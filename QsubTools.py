@@ -202,7 +202,7 @@ class QsubManager(object):
         self.latest_sub_id += 1
         self.qsubs[self.latest_sub_id]['state'] = 'requested'
         self.logger.info("Submission id: {0} granted".format(self.latest_sub_id))
-        return self.latest_sub_id
+        return self.latest_sub_id, self.logfile(self.latest_sub_id)
 
     def stage_submission(self, sub_id, script):
         with open('qsubs/{0}.sh'.format(sub_id), 'w') as fp:
@@ -211,6 +211,16 @@ class QsubManager(object):
 
     def get_state(self, sub_id):
         return self.qsubs[sub_id]['state']
+
+    @staticmethod
+    def logfile(sub_id):
+        return '{0}/{1}'.format(LOGDIR, sub_id)
+
+    def error_log(self, sub_id):
+        return self.logfile(sub_id) + '.e'
+
+    def out_log(self, sub_id):
+        return self.logfile(sub_id) + '.o'
 
     @staticmethod
     def get_available_modules():
@@ -311,12 +321,16 @@ class QsubGenerator(object):
         ss = self.submission_script
         class QsubInstance(BaseQsubInstance):
             @staticmethod
-            def set_manager():
-                return manager
+            def set_submission_script():
+                return ss
 
             @staticmethod
             def set_submission_script():
                 return ss
+
+            @staticmethod
+            def set_qsub_generator():
+                return self
 
         return QsubInstance
 
@@ -385,8 +399,13 @@ class BaseQsubInstance(object):
         self.kwargs = kwargs
         self.qsub_manager = self.set_manager()
         self.submission_script = self.set_submission_script()
-        self.sub_id = self.qsub_manager.request_submission()
+        self.qsub_generator = self.set_qsub_generator()
+        (self.sub_id, self.logfile) = self.qsub_manager.request_submission()
 
+    def stage_submission(self):
+        exe = 'python -c "from {0} import {1}; from QsubTools import QsubExecutor; QsubExecutor({1}, {2}, {3}'.format(
+            self.qsub_generator.package, self.qsub_generator.module, self.sub_id, self.qsub_manager.get_ip())
+        self.submission_script.generate(exe, self.logfile)
 
     @staticmethod
     def set_manager():
@@ -395,6 +414,10 @@ class BaseQsubInstance(object):
     @staticmethod
     def set_submission_script():
         return SubmissionScript(WORKDIR, BASE_MODULES)
+
+    @staticmethod
+    def set_qsub_generator():
+        return QsubGenerator()
 
 class QsubExecutor(object):
     def __init__(self, cls, sub_id, manager_ip):
