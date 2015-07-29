@@ -88,13 +88,17 @@ HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
 
 
 def init_manager():
-    logger.debug("Creating Daemon")
-    daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
-    logger.debug("Init Manager")
-    manager = QsubManager()
-    daemon.register(manager, "qsub.manager")
-    logger.info("putting manager in request loop")
-    daemon.requestLoop(loopCondition=manager.is_alive)
+    logger.debug("Initializing manager")
+    try:
+        daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
+        logger.debug("Init Manager")
+        manager = QsubManager()
+        daemon.register(manager, "qsub.manager")
+        logger.info("putting manager in request loop")
+        daemon.requestLoop(loopCondition=manager.is_alive)
+    except Exception as e:
+        logger.error(e.message)
+        raise e
 
 
 def isup_manager():
