@@ -216,7 +216,12 @@ class QsubManager(object):
         print 'shutting down qsub manager'
         self.running = False
 
-    def get_ip(self):
+    @staticmethod
+    def path_exists(path):
+        return os.path.exists(path)
+
+    @staticmethod
+    def get_ip():
         return Pyro4.socketutil.getIpAddress('localhost', workaround127=True)
 
 
@@ -247,7 +252,7 @@ class QsubGenerator(object):
             if not any(wallclock):
                 raise InvalidQsubArguments('No wall clock time assigned to job: {0}:{1}:{2}'.format(wallclock))
 
-            if not os.path.exists(self.work_dir):
+            if not self.manager.path_exists(self.work_dir):
                 raise InvalidQsubArguments("Work directory {0} doesn't exist.".format(self.work_dir))
 
             if additional_modules:
