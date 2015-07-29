@@ -188,9 +188,19 @@ class QsubManager(object):
     def __init__(self):
         self._available_modules = self.get_available_modules()
         self.running = True
+        self.latest_sub_id = -1
+        self.qsubs = defaultdict(dict)
 
     def available_modules(self):
         return self._available_modules
+
+    def request_submission(self):
+        self.latest_sub_id += 1
+        self.qsubs[self.latest_sub_id]['state'] = 'requested'
+        return self.latest_sub_id
+
+    def get_state(self, sub_id):
+        return self.qsubs[sub_id]['state']
 
     @staticmethod
     def get_available_modules():
@@ -348,6 +358,7 @@ class SubmissionScript(object):
 class QsubExecutor(object):
     def __init__(self, cls, sub_id, manager_ip):
         self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000")
+
 
 
 
