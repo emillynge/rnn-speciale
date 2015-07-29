@@ -125,7 +125,8 @@ target/
 # Debug files
 *.dSYM/
 
-
+# local test-files
+*-test.py
 
 .gitignore
 .idea
