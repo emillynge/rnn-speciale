@@ -31,6 +31,12 @@ class InvalidQsubArguments(Exception):
     pass
 
 
+def open_ssh_session_to_server():
+    import pxssh
+    s = pxssh.pxssh()
+    if not s.login(SSH_HOST, SSH_USERNAME, ssh_key=SSH_PRIVATE_KEY):
+        raise pxssh.ExceptionPxssh('Login failed')
+
 def create_logger(loggername="Qsub"):
     # create logger with 'spam_application'
     _logger = logging.getLogger(loggername)
@@ -186,7 +192,7 @@ class QsubManager(object):
 
     @staticmethod
     def get_available_modules():
-        p = Popen("SERVER_MODULE_BIN avail", stdout=FNULL, stderr=PIPE, shell=True)
+        p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)[0]
         logger.debug(lines)
