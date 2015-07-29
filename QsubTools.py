@@ -270,7 +270,7 @@ class QsubGenerator(object):
             self.check_modules()
         except InvalidQsubArguments as e:
             self.logger.error('Invalid parameters passed to Qsub', exc_info=True)
-            #raise e
+            raise e
 
         self.submission_script = self.make_submission_script()
 
@@ -294,6 +294,19 @@ class QsubGenerator(object):
                 raise InvalidQsubArguments("Required module version {0} is not available for module {1}".format(version,
                                                                                                               module))
             self.logger.debug("module {0}, version {1} is available".format(module, version if version else "default"))
+
+    def get_instance(self):
+        sub_id = self.manager.request_submission()
+        manager = self.manager
+
+        class QsubInstance(BaseQsubInstance):
+            def set_manager(self):
+                return manager
+
+            def set_sub_id(self):
+                return sub_id
+
+        return QsubInstance
 
 
 class SubmissionScript(object):
@@ -354,6 +367,18 @@ class SubmissionScript(object):
         self.append_PBS("l", "walltime={0}:{1}:{2}".format(wallclock.h, wallclock.m, wallclock.s))
 
 
+class BaseQsubInstance(object):
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        self.sub_id = self.set_sub_id()
+        self.qsub_manager = self.set_manager()
+
+    def set_sub_id(self):
+        return -1
+
+    def set_manager(self):
+        return Pyro4.Proxy("")
 
 class QsubExecutor(object):
     def __init__(self, cls, sub_id, manager_ip):
