@@ -126,3 +126,7 @@ target/
 *.dSYM/
 
 
+
+.gitignore
+.idea
+rnn-speciale.iml
