@@ -3,6 +3,7 @@ USER = "s082768@student.dtu.dk"
 WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale"
 LOGDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/qsub/logs"
 SERVER_PYTHON_BIN = "/usr/local/gbar/apps/python/2.7.1/bin/python"
+SERVER_MODULE_BIN = "/apps/dcc/bin/module"
 QSUB_MANAGER_PORT = 5000
 SSH_USERNAME = "s082768"
 SSH_PRIVATE_KEY = "/home/emil/.ssh/id_rsa"
@@ -185,7 +186,7 @@ class QsubManager(object):
 
     @staticmethod
     def get_available_modules():
-        p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
+        p = Popen("SERVER_MODULE_BIN avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)[0]
         logger.debug(lines)
