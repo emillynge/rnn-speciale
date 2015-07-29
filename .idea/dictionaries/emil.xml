@@ -1,8 +1,25 @@
 <component name="ProjectDictionaryState">
   <dictionary name="emil">
     <words>
+      <w>asctime</w>
+      <w>commtimeout</w>
+      <w>cuda</w>
+      <w>fnull</w>
+      <w>gbar</w>
+      <w>gpus</w>
+      <w>isup</w>
+      <w>levelname</w>
+      <w>logdir</w>
+      <w>modulefiles</w>
+      <w>pvmem</w>
+      <w>pyro</w>
       <w>qsub</w>
+      <w>qsubs</w>
+      <w>speciale</w>
+      <w>vmem</w>
       <w>wallclock</w>
+      <w>workdir</w>
+      <w>zhome</w>
     </words>
   </dictionary>
 </component>
