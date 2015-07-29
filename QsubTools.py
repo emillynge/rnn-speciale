@@ -98,7 +98,7 @@ class QsubClient(object):
         self.manager_ssh_server, self.manager_client_port = make_tunnel(5000)
         self.manager = self.get_manager()
         self.manager.is_alive()
-        self.logger.debug("Successfully connected to Qsub manager on local port %d".format(self.manager_client_port))
+        self.logger.debug("Successfully connected to Qsub manager on local port {0}".format(self.manager_client_port))
 
     def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules=None):
         return QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
@@ -131,12 +131,12 @@ class QsubClient(object):
         if not self.isup_manager():
             self.logger.info("Manager still not up after init")
             if retries > self.max_retry:
-                self.logger.error("Giving up on initializing manager after %d tries".format(self.max_retry))
+                self.logger.error("Giving up on initializing manager after {0} tries".format(self.max_retry))
             else:
                 self.init_manager(retries=retries + 1)
 
     def get_manager(self):
-        return Pyro4.Proxy("PYRO:qsub.manager@localhost:%d".format(self.manager_client_port))
+        return Pyro4.Proxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port))
 
 
 def init_manager():
@@ -211,7 +211,7 @@ class QsubGenerator(object):
         # def set_parameters(self, hours=0, minutes=0, seconds=0, nodes=1, processors_per_node=1, gpus=0,
         # memory_per_process=None, memory_total=None, ):
         # if not any([hours, minutes, seconds]):
-        #         raise InvalidQsubArguments('No wall clock time assigned to job: %d:%d:%d' % (hours, minutes, seconds))
+        #         raise InvalidQsubArguments('No wall clock time assigned to job: {0}:{1}:{2}' % (hours, minutes, seconds))
         #
         #     if nodes < 1 or processors_per_node < 1:
         #         raise InvalidQsubArguments('A job must have at least 1 node and 1 processor')
