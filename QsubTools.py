@@ -140,7 +140,9 @@ class QsubClient(object):
             self.restart_manager()
 
     def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules=None):
-        return QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
+        qsub_gen = QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
+        return qsub_gen.get_instance_class()
+
 
     @staticmethod
     def setup_ssh_server():
@@ -308,10 +310,6 @@ class QsubGenerator(object):
                 return manager
 
             @staticmethod
-            def set_sub_id():
-                return sub_id
-
-            @staticmethod
             def set_submission_script():
                 return ss
 
@@ -380,9 +378,9 @@ class BaseQsubInstance(object):
     def __init__(self, *args, **kwargs):
         self.args = args
         self.kwargs = kwargs
-        self.sub_id = self.set_sub_id()
         self.qsub_manager = self.set_manager()
         self.submission_script = self.set_submission_script()
+        self.sub_id = self.qsub_manager.request_submission()
 
     @staticmethod
     def set_sub_id():
@@ -390,7 +388,7 @@ class BaseQsubInstance(object):
 
     @staticmethod
     def set_manager():
-        return Pyro4.Proxy("")
+        return QsubManager()
 
     @staticmethod
     def set_submission_script():
