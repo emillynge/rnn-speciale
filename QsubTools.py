@@ -23,7 +23,7 @@ from time import sleep
 
 Pyro4.config.COMMTIMEOUT = 5.0  # without this daemon.close() hangs
 
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 
 
 class InvalidQsubArguments(Exception):
@@ -187,21 +187,20 @@ class QsubManager(object):
     def get_available_modules():
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
-                           "\n".join(p.communicate()), re.DOTALL)
-        module_list = re.findall('([^ \t])/([^ \t])[ \t\(]', '\n'.join(lines))
-        logger.debug("HI")
-        logger.debug(lines)
-        logger.debug(module_list)
-        module_dict = dict()
-        for (module, version) in module_list:
-            if module not in module_dict:
-                module_dict[module] = list()
-            module_dict[module] = version
+                           p.communicate()[1], re.DOTALL)[0]
+        modules = re.split('[ \t\n]+', lines)[:-1]
+        module_ver_list = [m.strip('(default)').split('/') for m in modules]
+
+        module_dict = defaultdict(list)
+        for mod_ver in module_ver_list:
+            if len(mod_ver) < 2:
+                mod_ver.append('default')
+
+            module_dict[mod_ver[0]].append(mod_ver[1])
         return module_dict
 
     def is_alive(self):
         return self.running
-
 
     def shutdown(self):
         print 'shutting down qsub manager'
