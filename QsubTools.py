@@ -422,7 +422,7 @@ class BaseQsubInstance(object):
 
 class QsubExecutor(object):
     def __init__(self, cls, sub_id, manager_ip):
-        self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000")
+        self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000".format(manager_ip))
         if self.manager.is_alive():
             print "manager found!"
         print cls
