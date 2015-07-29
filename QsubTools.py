@@ -379,12 +379,19 @@ class BaseQsubInstance(object):
         self.kwargs = kwargs
         self.sub_id = self.set_sub_id()
         self.qsub_manager = self.set_manager()
+        self.submission_script = self.set_submission_script()
 
-    def set_sub_id(self):
+    @staticmethod
+    def set_sub_id():
         return -1
 
-    def set_manager(self):
+    @staticmethod
+    def set_manager():
         return Pyro4.Proxy("")
+
+    @staticmethod
+    def set_submission_script():
+        return SubmissionScript(WORKDIR, BASE_MODULES)
 
 class QsubExecutor(object):
     def __init__(self, cls, sub_id, manager_ip):
