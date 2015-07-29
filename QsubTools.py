@@ -104,21 +104,23 @@ def init_manager():
     my_ip = QsubManager.get_ip()
     _logger.debug("Init Manager")
     manager = QsubManager()
-    def init_manager_on_interface(interface, port):
+    def register_object_on_interface(object, name, interface, port):
         try:
             daemon = Pyro4.Daemon(port=port, host=interface)
-            daemon.register(manager, "qsub.manager")
+            daemon.register(object, name)
             _logger.info("putting manager in request loop")
             daemon.requestLoop(loopCondition=manager.is_alive)
         except Exception as e:
             _logger.error(e.message, exc_info=True)
             raise e
 
-    localhost = Thread(target=init_manager_on_interface, args=('localhost', QSUB_MANAGER_PORT))
+    localhost = Thread(target=register_object_on_interface, args=(manager, 'qsub.manager', 'localhost', QSUB_MANAGER_PORT))
     localhost.start()
 
-    exposed = Thread(target=init_manager_on_interface, args=(my_ip, QSUB_MANAGER_PORT + 1))
-    exposed.start()
+    proxy_manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
+
+    register_object_on_interface(proxy_manager, 'qsub.managerproxy', my_ip, QSUB_MANAGER_PORT)
+
 
 def isup_manager():
     manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
