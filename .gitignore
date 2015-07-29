@@ -130,3 +130,7 @@ target/
 .gitignore
 .idea
 rnn-speciale.iml
+Theano
+pycuda
+skaae
+nntools

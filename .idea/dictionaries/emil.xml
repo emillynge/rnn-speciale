@@ -6,6 +6,7 @@
       <w>cuda</w>
       <w>fnull</w>
       <w>gbar</w>
+      <w>gitmodules</w>
       <w>gpus</w>
       <w>isup</w>
       <w>levelname</w>
@@ -16,6 +17,7 @@
       <w>qsub</w>
       <w>qsubs</w>
       <w>speciale</w>
+      <w>submodule</w>
       <w>vmem</w>
       <w>wallclock</w>
       <w>workdir</w>
