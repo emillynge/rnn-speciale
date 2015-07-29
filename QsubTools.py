@@ -170,6 +170,7 @@ class QsubManager(object):
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            "\n".join(p.communicate()), re.DOTALL)
         module_list = re.findall('([^ \t])/([^ \t])[ \t\(]', '\n'.join(lines))
+        logger.debug("HI")
         logger.debug(lines)
         logger.debug(module_list)
         module_dict = dict()
@@ -181,6 +182,7 @@ class QsubManager(object):
 
     def is_alive(self):
         return self.running
+
 
     def shutdown(self):
         print 'shutting down qsub manager'
