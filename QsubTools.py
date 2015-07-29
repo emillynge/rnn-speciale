@@ -114,10 +114,10 @@ def init_manager():
             _logger.error(e.message, exc_info=True)
             raise e
 
-    localhost = Thread(target="init_manager_on_interface", args=('localhost', QSUB_MANAGER_PORT))
+    localhost = Thread(target=init_manager_on_interface, args=('localhost', QSUB_MANAGER_PORT))
     localhost.start()
 
-    exposed = Thread(target="init_manager_on_interface", args=(my_ip, QSUB_MANAGER_PORT + 1))
+    exposed = Thread(target=init_manager_on_interface, args=(my_ip, QSUB_MANAGER_PORT + 1))
     exposed.start()
 
 def isup_manager():
