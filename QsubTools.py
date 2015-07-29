@@ -186,10 +186,12 @@ class QsubClient(object):
 
 class QsubManager(object):
     def __init__(self):
+        self.logger = create_logger('Manager')
         self._available_modules = self.get_available_modules()
         self.running = True
         self.latest_sub_id = -1
         self.qsubs = defaultdict(dict)
+        self.logger.info("Manager stated")
 
     def available_modules(self):
         return self._available_modules
@@ -197,6 +199,7 @@ class QsubManager(object):
     def request_submission(self):
         self.latest_sub_id += 1
         self.qsubs[self.latest_sub_id]['state'] = 'requested'
+        self.logger.info("Submission id: {0} granted".format(self.latest_sub_id))
         return self.latest_sub_id
 
     def get_state(self, sub_id):
@@ -295,7 +298,7 @@ class QsubGenerator(object):
                                                                                                               module))
             self.logger.debug("module {0}, version {1} is available".format(module, version if version else "default"))
 
-    def get_instance(self):
+    def get_instance_class(self):
         sub_id = self.manager.request_submission()
         manager = self.manager
         ss = self.submission_script
