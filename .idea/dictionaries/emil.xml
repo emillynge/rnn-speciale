@@ -2,6 +2,7 @@
   <dictionary name="emil">
     <words>
       <w>qsub</w>
+      <w>wallclock</w>
     </words>
   </dictionary>
 </component>
