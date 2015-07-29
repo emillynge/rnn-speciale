@@ -113,7 +113,7 @@ class QsubClient(object):
         return ssh
 
     def isup_manager(self):
-        (i, o, e) = self.ssh.exec_command("cd  %s; %s QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
+        (i, o, e) = self.ssh.exec_command("cd  {0}; {1} QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
         msg = o.readlines()
         self.logger.debug(msg)
         if "False\n" in msg:
@@ -126,7 +126,7 @@ class QsubClient(object):
             raise Exception("".join(e.readlines()))
 
     def init_manager(self, retries=0):
-        self.ssh.exec_command("cd  %s; %s QsubTools.py init manager".format(WORKDIR, SERVER_PYTHON_BIN), timeout=4)
+        self.ssh.exec_command("cd  {0}; {1} QsubTools.py init manager".format(WORKDIR, SERVER_PYTHON_BIN), timeout=4)
         sleep(4)
         if not self.isup_manager():
             self.logger.info("Manager still not up after init")
@@ -221,7 +221,7 @@ class QsubGenerator(object):
         #     self.wc_time = HPC_Time(h=hours, m=minutes, s=seconds)
         #
         #     if not os.path.exists(self.work_dir):
-        #         raise InvalidQsubArguments("Work directory %s doesn't exist.".format(self.work_dir)
+        #         raise InvalidQsubArguments("Work directory {0} doesn't exist.".format(self.work_dir)
         if additional_modules:
             self.modules.update(additional_modules)
         self.check_modules()
@@ -233,9 +233,9 @@ class QsubGenerator(object):
     def check_modules(self):
         for (module, version) in self.modules.iteritems():
             if module not in self.available_modules:
-                raise InvalidQsubArguments("Required module %s is not available".format(module))
+                raise InvalidQsubArguments("Required module {0} is not available".format(module))
             if version and version not in self.available_modules[module]:
-                raise InvalidQsubArguments("Required module version %s is not available for module %s".format(version,
+                raise InvalidQsubArguments("Required module version {0} is not available for module {1}".format(version,
                                                                                                               module))
 
     def qsub(self):
