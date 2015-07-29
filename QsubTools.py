@@ -186,6 +186,9 @@ class QsubManager(object):
         print 'shutting down qsub manager'
         self.running = False
 
+    def get_ip(self):
+        return Pyro4.socketutil.getIpAddress('localhost', workaround127=True)
+
 
 class QsubGenerator(object):
     def __init__(self, qsub_manager, package, module, wallclock, resources, rel_dir, additional_modules):
