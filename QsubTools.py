@@ -298,13 +298,19 @@ class QsubGenerator(object):
     def get_instance(self):
         sub_id = self.manager.request_submission()
         manager = self.manager
-
+        ss = self.submission_script
         class QsubInstance(BaseQsubInstance):
-            def set_manager(self):
+            @staticmethod
+            def set_manager():
                 return manager
 
-            def set_sub_id(self):
+            @staticmethod
+            def set_sub_id():
                 return sub_id
+
+            @staticmethod
+            def set_submission_script():
+                return ss
 
         return QsubInstance
 
