@@ -123,7 +123,7 @@ class QsubClient(object):
             self.logger.debug("Manager up")
             return True
         else:
-            raise Exception(e.readlines())
+            raise Exception("".join(e.readlines()))
 
     def init_manager(self, retries=0):
         self.ssh.exec_command("cd  %s; %s QsubTools.py init manager".format(WORKDIR, SERVER_PYTHON_BIN), timeout=4)
@@ -194,6 +194,7 @@ class QsubGenerator(object):
     def __init__(self, qsub_manager, package, module, wallclock, resources, rel_dir, additional_modules):
         assert isinstance(wallclock, HPC_Time)
         assert isinstance(resources, HPC_resources)
+        assert isinstance(qsub_manager, QsubManager)
 
         self.available_modules = qsub_manager.available_modules()
         self.resources = None
@@ -203,7 +204,7 @@ class QsubGenerator(object):
         self.rel_dir = rel_dir
         self.package = package
         self.module = module
-
+        self.manager_ip = qsub_manager.get_ip
         self.resources = resources
         self.wc_time = wallclock
         #
