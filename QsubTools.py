@@ -204,6 +204,11 @@ class QsubManager(object):
         self.logger.info("Submission id: {0} granted".format(self.latest_sub_id))
         return self.latest_sub_id
 
+    def stage_submission(self, sub_id, script):
+        with open('qsubs/{0}.sh'.format(sub_id), 'w') as fp:
+            fp.write(script)
+        self.qsubs[sub_id]['state'] = 'staged'
+
     def get_state(self, sub_id):
         return self.qsubs[sub_id]['state']
 
@@ -382,9 +387,6 @@ class BaseQsubInstance(object):
         self.submission_script = self.set_submission_script()
         self.sub_id = self.qsub_manager.request_submission()
 
-    @staticmethod
-    def set_sub_id():
-        return -1
 
     @staticmethod
     def set_manager():
