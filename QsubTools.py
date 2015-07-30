@@ -408,9 +408,6 @@ class QsubExecutor(object):
         print sub_id
 
 
-
-
-
 class QsubCommandline(object):
     def __init__(self):
         self.args2method = {'manager': {'start': self.start_manager,
@@ -494,9 +491,13 @@ class QsubCommandline(object):
         daemon.requestLoop(loopCondition=manager.is_alive)
 
     def stop_manager(self):
-        manager = self.get_manager()
-        manager.shutdown()
-        self.execute_return(0)
+        try:
+            manager = self.get_manager()
+            manager.shutdown()
+            while True:
+                manager.is_alive()
+        except pyro_errors.CommunicationError:
+            self.execute_return(0)
 
     def isup_manager(self):
         manager = self.get_manager()
@@ -576,10 +577,13 @@ class RemoteQsubCommandline(QsubCommandline):
     def ssh_expect(self, pattern):
         patterns = ['error:', pattern]
         idx = self.ssh.expect(patterns)
-        self.data[patterns[idx].strip(':')] = json.loads(self.ssh.readline())
         if idx == 0:
+            self.data['error'] = self.ssh.readline()
+            sleep(.5)
             raise self.CommandLineException('in {0}\n\t{1}'.format(self.get_exec_func().im_func.func_name,
                                                                    self.data['error']))
+        else:
+            self.data[patterns[idx].strip(':')] = json.loads(self.ssh.readline())
 
     def post_execute(self):
         if self.args.ip:
