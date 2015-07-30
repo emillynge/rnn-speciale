@@ -445,6 +445,7 @@ class QsubCommandline(object):
         except Exception as e:
             self.logger.error("Exception ocurred during execution of {0} {1}".format(self.args.action, self.args.module),
                               exc_info=True)
+            sleep(.5)
             self.stdout('error', e.message)
 
     def post_execute(self):
@@ -487,6 +488,7 @@ class QsubCommandline(object):
         self.logger.debug("Init Manager")
         manager = QsubManager()
         daemon.register(manager, "qsub.manager")
+        self.stdout('blocking', datetime.datetime.now().isoformat())
         self.logger.info("putting manager in request loop")
         self.stdout('blocking', datetime.datetime.now().isoformat())
         daemon.requestLoop(loopCondition=manager.is_alive)
@@ -587,6 +589,7 @@ class RemoteQsubCommandline(QsubCommandline):
             self.ssh_expect('return:')
         else:
             self.ssh_expect('blocking')
+            self.ssh.logout()
 
     @staticmethod
     def setup_ssh_instance():
