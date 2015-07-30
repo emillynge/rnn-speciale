@@ -42,23 +42,34 @@ def open_ssh_session_to_server():
         raise pxssh.ExceptionPxssh('Login failed')
     return s
 
-def create_logger(loggername="Qsub"):
+
+def create_logger(loggername="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG'):
+    if not log_to_file and not log_to_stream:   # neither stream nor logfile specified. no logger wanted.
+        return DummyLogger()
     # create logger with 'spam_application'
     _logger = logging.getLogger(loggername)
-    _logger.setLevel(logging.DEBUG)
-    # create file handler which logs even debug messages
-    fh = logging.FileHandler('logs/qsubs.log')
-    fh.setLevel(logging.DEBUG)
-    # create console handler with a higher log level
-    ch = logging.StreamHandler()
-    ch.setLevel(logging.DEBUG)
+    _logger.setLevel(log_level)
     # create formatter and add it to the handlers
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    fh.setFormatter(formatter)
-    ch.setFormatter(formatter)
-    # add the handlers to the logger
-    _logger.addHandler(fh)
-    _logger.addHandler(ch)
+
+    if log_to_file:
+        if not isinstance(log_to_file, list):
+            log_to_file = [log_to_file] if log_to_file else list()
+
+        for logfile in log_to_file:
+            # create file handler which logs even debug messages
+            fh = logging.FileHandler(logfile)
+            fh.setLevel(log_level)
+            fh.setFormatter(formatter)
+            _logger.addHandler(fh)
+
+    if log_to_stream:
+        # create console handler with a higher log level
+        ch = logging.StreamHandler()
+        ch.setLevel(log_level)
+        ch.setFormatter(formatter)
+        _logger.addHandler(ch)
+
     return _logger
 
 
@@ -66,16 +77,16 @@ logger = create_logger()
 
 
 class DummyLogger(object):
-    def debug(self, *args):
+    def debug(self, *args, **kwargs):
         pass
 
-    def info(self, *args):
+    def info(self, *args, **kwargs):
         pass
 
-    def warning(self, *args):
+    def warning(self, *args, **kwargs):
         pass
 
-    def error(self, *args):
+    def error(self, *args, **kwargs):
         pass
 
 
@@ -97,42 +108,6 @@ HPC_Time = namedtuple("Time", ['h', 'm', 's'])
 HPC_Time.__new__.__defaults__ = (0, 0, 0)
 HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'pvmem', 'vmem'])
 HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
-
-
-def init_manager():
-    _logger = create_logger('init')
-    _logger.debug("Initializing manager")
-    my_ip = QsubManager.get_ip()
-    _logger.debug("Init Manager")
-    manager = QsubManager()
-    def register_object_on_interface(object, name, interface, port):
-        try:
-            daemon = Pyro4.Daemon(port=port, host=interface)
-            daemon.register(object, name)
-            _logger.info("putting manager in request loop")
-            daemon.requestLoop(loopCondition=manager.is_alive)
-        except Exception as e:
-            _logger.error(e.message, exc_info=True)
-            raise e
-
-    localhost = Thread(target=register_object_on_interface, args=(manager, 'qsub.manager', 'localhost', QSUB_MANAGER_PORT))
-    localhost.start()
-
-    proxy_manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
-    register_object_on_interface(proxy_manager, 'qsub.managerproxy', my_ip, QSUB_MANAGER_PORT)
-
-
-def isup_manager():
-    manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
-    try:
-        if manager.is_alive():
-            print True
-    except pyro_errors.CommunicationError:
-        print False
-
-def stop_manager():
-    manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
-    manager.shutdown()
 
 class QsubClient(object):
     def __init__(self, restart_manager=False):
@@ -448,37 +423,87 @@ class QsubExecutor(object):
 class QsubCommandline(object):
     def __init__(self, args):
         self.my_ip = QsubManager.get_ip()
-        self.args2method = {'manager': {'start': self.init_manager,
+        self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
         self.args = args
-        self.args2method[args.module][args.action]()
+        self.logger = self.create_logger()
+        if self.args.ip:
+            self.stdout('ip', self.my_ip)
 
-    def init_manager(self):
-        _logger = create_logger('init')
-        _logger.debug("Initializing manager")
         try:
-            daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
-            _logger.debug("Init Manager")
-            manager = QsubManager()
-            daemon.register(manager, "qsub.manager")
-            _logger.info("putting manager in request loop")
-            daemon.requestLoop(loopCondition=manager.is_alive)
+            self.args2method[args.module][args.action]()
         except Exception as e:
-            _logger.error(e.message, exc_info=True)
-            raise e
+            self.logger.error("Exception ocurred during execution of {0} {1}".format(args.action, args.module),
+                              exc_info=True)
+            self.stdout('error', e.message)
+
+    def create_logger(self):
+        kwargs = dict()
+        kwargs["log_to_stream"] = self.args.stream
+        if self.args.logfiles is False:
+            kwargs['log_to_file'] = list()
+        else:
+            if self.args.logfiles:
+                kwargs['log_to_file'] = self.args.logfiles
+        kwargs["loggername"] = 'CLI/{0} {1}'.format(self.args.action, self.args.module)
+        if self.args.log_level:
+            kwargs['log_level'] = self.args.log_level
+        return create_logger(**kwargs)
+
+    def stdout(self, tag, message):
+        print "{0}: {1}".format(tag, message)
+
+    def get_manager(self):
+        return Pyro4.Proxy("PYRO:qsub.manager@{0}:{1}".format(self.my_ip, QSUB_MANAGER_PORT))
+
+    def execute_return(self, result):
+        self.stdout('return', result)
+
+    def start_manager(self):
+        self.logger.debug("Initializing manager")
+        daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT, host=self.my_ip)
+        self.logger.debug("Init Manager")
+        manager = QsubManager()
+        daemon.register(manager, "qsub.manager")
+        self.logger.info("putting manager in request loop")
+        daemon.requestLoop(loopCondition=manager.is_alive)
+
+    def stop_manager(self):
+        manager = self.get_manager()
+        manager.shutdown()
 
     def isup_manager(self):
-        manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
+        manager = self.get_manager()
         try:
             if manager.is_alive():
-                print True
+                self.execute_return(True)
         except pyro_errors.CommunicationError:
-            print False
+            self.execute_return(False)
 
 if __name__ == "__main__":
     parser = ArgumentParser('Command line interface to QsubTools')
+    parser.add_argument('-i', '--get-ip', action='store_true', help='output ip to stdout before executing action',
+                        dest='ip')
+    logging_group = parser.add_argument_group("logging")
+    logging_group.add_argument('-s', '--stream', action='store_true', help='activate logging to stdout (default False)',
+                               dest='stream')
+
+    logging_group.add_argument('-L', '--log-level', choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='log level',
+                               dest='log_level')
+
+    logfile_group = logging_group.add_mutually_exclusive_group()
+    logfile_group.add_argument('-f', '--file', action='append', help='specify logging to specific file(s).',
+                               dest='logfiles', nargs='+')
+
+    logfile_group.add_argument('-F', '--disable-file', action='store_false', help='disable logging to file',
+                               dest='logfiles')
+
     parser.add_argument('action', choices=['start', 'stop', 'isup'], help="action to send to module")
     parser.add_argument('module', choices=['manager'], help="module to send action to")
-    args = parser.parse_args()
-    QsubCommandline(args)
+
+
+    #logging_subparser.add_argument('--stream', '-s', action='store_true', help='activate logging to stdout (default False)', dest='stream')
+    #logging_subparser.add_argument()
+
+    QsubCommandline(parser.parse_args())
