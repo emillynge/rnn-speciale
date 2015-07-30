@@ -488,7 +488,7 @@ class QsubCommandline(object):
         manager = QsubManager()
         daemon.register(manager, "qsub.manager")
         self.logger.info("putting manager in request loop")
-        self.stdout('blocking', datetime.datetime.now().a.isoformat())
+        self.stdout('blocking', datetime.datetime.now().isoformat())
         daemon.requestLoop(loopCondition=manager.is_alive)
 
     def stop_manager(self):
@@ -538,6 +538,7 @@ class RemoteQsubCommandline(QsubCommandline):
     def __init__(self, commands):
         self.command = commands
         self.ssh = self.setup_ssh_instance()
+        self.ssh.ignore_sighup = False
         super(RemoteQsubCommandline, self).__init__()
 
     def parse_args(self):
@@ -564,7 +565,7 @@ class RemoteQsubCommandline(QsubCommandline):
         full_command += self.command
 
         if blocking:
-            full_command += ' &'
+            full_command += ' > nohup.out & tail -f nohup.out'
         self.command = full_command
 
     def execute(self):
