@@ -1,4 +1,5 @@
 import os
+import datetime
 
 __author__ = 'emil'
 USER = "s082768@student.dtu.dk"
@@ -115,8 +116,7 @@ class QsubClient(object):
         self.max_retry = 3
         self.logger = create_logger("Client")
 
-        self.ssh = self.setup_ssh_server()
-        hot_start = self.isup_manager()
+        self.manager_ip, hot_start = RemoteQsubCommandline('-i isup manager').data.fromkeys(['ip', 'result'])
         if not hot_start:
             self.init_manager()
 
@@ -147,8 +147,7 @@ class QsubClient(object):
 
     def init_manager(self, retries=0):
         timeout = retries * 2
-        self.ssh.sendline("nohup python QsubTools.py init manager &")
-        self.ssh.prompt()
+        RemoteQsubCommandline('init manager')
         sleep(timeout)
         if not self.isup_manager():
             self.logger.info("Manager still not up after init")
@@ -489,11 +488,13 @@ class QsubCommandline(object):
         manager = QsubManager()
         daemon.register(manager, "qsub.manager")
         self.logger.info("putting manager in request loop")
+        self.stdout('blocking', datetime.datetime.now().a.isoformat())
         daemon.requestLoop(loopCondition=manager.is_alive)
 
     def stop_manager(self):
         manager = self.get_manager()
         manager.shutdown()
+        self.execute_return(0)
 
     def isup_manager(self):
         manager = self.get_manager()
@@ -583,6 +584,8 @@ class RemoteQsubCommandline(QsubCommandline):
 
         if not self.blocking():
             self.ssh_expect('return:')
+        else:
+            self.ssh_expect('blocking')
 
     @staticmethod
     def setup_ssh_instance():
