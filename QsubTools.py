@@ -471,7 +471,7 @@ class QsubCommandline(object):
 
     @staticmethod
     def stdout(tag, obj):
-        print "{0}: {1}".format(tag, json.dumps(obj))
+        sys.stdout.write("{0}: {1}\n\r".format(tag, json.dumps(obj)))
 
     def get_manager(self):
         return Pyro4.Proxy("PYRO:qsub.manager@{0}:{1}".format(self.data['ip'], QSUB_MANAGER_PORT))
