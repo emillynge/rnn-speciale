@@ -342,7 +342,6 @@ class SubmissionScript(object):
 
         script += 'cd {0}\n'.format(self.wd)
 
-
         if isinstance(execute_commands, list):
             script += '\n'.join(execute_commands)
         else:
@@ -421,20 +420,20 @@ class QsubExecutor(object):
 
 
 class QsubCommandline(object):
-    def __init__(self, args):
+    def __init__(self):
         self.my_ip = QsubManager.get_ip()
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
-        self.args = args
+        self.args = self.get_argument_parser().parse_args()
         self.logger = self.create_logger()
         if self.args.ip:
             self.stdout('ip', self.my_ip)
 
         try:
-            self.args2method[args.module][args.action]()
+            self.args2method[self.args.module][self.args.action]()
         except Exception as e:
-            self.logger.error("Exception ocurred during execution of {0} {1}".format(args.action, args.module),
+            self.logger.error("Exception ocurred during execution of {0} {1}".format(self.args.action, self.args.module),
                               exc_info=True)
             self.stdout('error', e.message)
 
@@ -481,29 +480,28 @@ class QsubCommandline(object):
         except pyro_errors.CommunicationError:
             self.execute_return(False)
 
+    @staticmethod
+    def get_argument_parser(self):
+        parser = ArgumentParser('Command line interface to QsubTools')
+        parser.add_argument('-i', '--get-ip', action='store_true', help='output ip to stdout before executing action',
+                            dest='ip')
+        logging_group = parser.add_argument_group("logging")
+        logging_group.add_argument('-s', '--stream', action='store_true', help='activate logging to stdout (default False)',
+                                   dest='stream')
+
+        logging_group.add_argument('-L', '--log-level', choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='log level',
+                                   dest='log_level')
+
+        logfile_group = logging_group.add_mutually_exclusive_group()
+        logfile_group.add_argument('-f', '--file', action='append', help='specify logging to specific file(s).',
+                                   dest='logfiles', nargs='+')
+
+        logfile_group.add_argument('-F', '--disable-file', action='store_false', help='disable logging to file',
+                                   dest='logfiles')
+
+        parser.add_argument('action', choices=['start', 'stop', 'isup'], help="action to send to module")
+        parser.add_argument('module', choices=['manager'], help="module to send action to")
+        return parser
+
 if __name__ == "__main__":
-    parser = ArgumentParser('Command line interface to QsubTools')
-    parser.add_argument('-i', '--get-ip', action='store_true', help='output ip to stdout before executing action',
-                        dest='ip')
-    logging_group = parser.add_argument_group("logging")
-    logging_group.add_argument('-s', '--stream', action='store_true', help='activate logging to stdout (default False)',
-                               dest='stream')
-
-    logging_group.add_argument('-L', '--log-level', choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='log level',
-                               dest='log_level')
-
-    logfile_group = logging_group.add_mutually_exclusive_group()
-    logfile_group.add_argument('-f', '--file', action='append', help='specify logging to specific file(s).',
-                               dest='logfiles', nargs='+')
-
-    logfile_group.add_argument('-F', '--disable-file', action='store_false', help='disable logging to file',
-                               dest='logfiles')
-
-    parser.add_argument('action', choices=['start', 'stop', 'isup'], help="action to send to module")
-    parser.add_argument('module', choices=['manager'], help="module to send action to")
-
-
-    #logging_subparser.add_argument('--stream', '-s', action='store_true', help='activate logging to stdout (default False)', dest='stream')
-    #logging_subparser.add_argument()
-
-    QsubCommandline(parser.parse_args())
+    QsubCommandline()
