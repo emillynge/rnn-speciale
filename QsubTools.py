@@ -45,14 +45,15 @@ def open_ssh_session_to_server():
     return s
 
 
-def create_logger(loggername="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG'):
+def create_logger(loggername="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG', formatter=None):
     if not log_to_file and not log_to_stream:   # neither stream nor logfile specified. no logger wanted.
         return DummyLogger()
     # create logger with 'spam_application'
     _logger = logging.getLogger(loggername)
     _logger.setLevel(log_level)
     # create formatter and add it to the handlers
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    if not formatter:
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     if log_to_file:
         if not isinstance(log_to_file, list):
@@ -413,6 +414,7 @@ class QsubCommandline(object):
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
+        self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, formatter='%(message)s')
         self.args = self.parse_args()
         if self.args.remote:
             self.data = RemoteQsubCommandline(' '.join([arg for arg in sys.argv[1:] if arg not in ['-r', '--remote']]))
@@ -469,9 +471,8 @@ class QsubCommandline(object):
         kwargs = self.get_logger_args()
         return create_logger(**kwargs)
 
-    @staticmethod
-    def stdout(tag, obj):
-        sys.stdout.write("{0}: {1}\n\r".format(tag, json.dumps(obj)))
+    def stdout(self, tag, obj):
+        self.stdout_logger.debug("{0}: {1}\n\r".format(tag, json.dumps(obj)))
 
     def get_manager(self):
         return Pyro4.Proxy("PYRO:qsub.manager@{0}:{1}".format(self.data['ip'], QSUB_MANAGER_PORT))
