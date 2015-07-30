@@ -45,15 +45,16 @@ def open_ssh_session_to_server():
     return s
 
 
-def create_logger(loggername="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG', formatter=None):
+def create_logger(loggername="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG', formatstr=None):
     if not log_to_file and not log_to_stream:   # neither stream nor logfile specified. no logger wanted.
         return DummyLogger()
     # create logger with 'spam_application'
     _logger = logging.getLogger(loggername)
     _logger.setLevel(log_level)
     # create formatter and add it to the handlers
-    if not formatter:
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    if not formatstr:
+        formatstr = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    formatter = logging.Formatter(formatstr)
 
     if log_to_file:
         if not isinstance(log_to_file, list):
