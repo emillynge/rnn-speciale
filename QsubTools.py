@@ -415,7 +415,7 @@ class QsubCommandline(object):
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
-        self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, formatter='%(message)s')
+        self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, formatstr='%(message)s')
         self.args = self.parse_args()
         if self.args.remote:
             self.data = RemoteQsubCommandline(' '.join([arg for arg in sys.argv[1:] if arg not in ['-r', '--remote']]))
