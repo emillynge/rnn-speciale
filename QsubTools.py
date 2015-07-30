@@ -118,7 +118,6 @@ def init_manager():
     localhost.start()
 
     proxy_manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
-
     register_object_on_interface(proxy_manager, 'qsub.managerproxy', my_ip, QSUB_MANAGER_PORT)
 
 
