@@ -16,6 +16,7 @@ BASE_MODULES = {"python": '', "cuda": '', "boost": ''}
 from subprocess import Popen, PIPE
 
 FNULL = open('/dev/null', 'w')
+from argparse import ArgumentParser
 from threading import Thread
 import re
 import Pyro4.socketutil
@@ -444,15 +445,40 @@ class QsubExecutor(object):
 
 
 
+class QsubCommandline(object):
+    def __init__(self, args):
+        self.my_ip = QsubManager.get_ip()
+        self.args2method = {'manager': {'start': self.init_manager,
+                                        'stop': self.stop_manager,
+                                        'isup': self.isup_manager}}
+        self.args = args
+        self.args2method[args.module][args.action]()
+
+    def init_manager(self):
+        _logger = create_logger('init')
+        _logger.debug("Initializing manager")
+        try:
+            daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT)
+            _logger.debug("Init Manager")
+            manager = QsubManager()
+            daemon.register(manager, "qsub.manager")
+            _logger.info("putting manager in request loop")
+            daemon.requestLoop(loopCondition=manager.is_alive)
+        except Exception as e:
+            _logger.error(e.message, exc_info=True)
+            raise e
+
+    def isup_manager(self):
+        manager = Pyro4.Proxy("PYRO:qsub.manager@localhost:5000")
+        try:
+            if manager.is_alive():
+                print True
+        except pyro_errors.CommunicationError:
+            print False
+
 if __name__ == "__main__":
-    parameters = sys.argv[1:]
-    print parameters
-    if parameters[0] == 'init':
-        if parameters[1] == 'manager':
-            init_manager()
-    elif parameters[0] == 'isup':
-        if parameters[1] == 'manager':
-            isup_manager()
-    elif parameters[0] == 'stop':
-        if parameters[1] == 'manager':
-            stop_manager()
+    parser = ArgumentParser('Command line interface to QsubTools')
+    parser.add_argument('action', choices=['start', 'stop', 'isup'], help="action to send to module")
+    parser.add_argument('module', choices=['manager'], help="module to send action to")
+    args = parser.parse_args()
+    QsubCommandline(args)
