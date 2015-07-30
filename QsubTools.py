@@ -418,16 +418,22 @@ class QsubCommandline(object):
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
         self.args = self.parse_args()
-        self.logger = self.create_logger()
+        if self.args.remote:
+            self.data = RemoteQsubCommandline(' '.join([arg for arg in sys.argv[1:] if arg not in ['-r', '--remote']]))
+        else:
+            self.logger = self.create_logger()
 
-        self.data = dict()
+            self.data = dict()
 
-        self.pre_execute()
-        self.execute()
-        self.post_execute()
+            self.pre_execute()
+            self.execute()
+            self.post_execute()
 
     def parse_args(self, *args):
         return self.get_argument_parser().parse_args()
+
+    def get_exec_func(self):
+        return self.args2method[self.args.module][self.args.action]
 
     def pre_execute(self):
         self.data['ip'] = self.get_ip()
@@ -436,7 +442,7 @@ class QsubCommandline(object):
 
     def execute(self):
         try:
-            self.args2method[self.args.module][self.args.action]()
+            self.get_exec_func().__call__()
         except Exception as e:
             self.logger.error("Exception ocurred during execution of {0} {1}".format(self.args.action, self.args.module),
                               exc_info=True)
@@ -502,6 +508,8 @@ class QsubCommandline(object):
         parser = ArgumentParser('Command line interface to QsubTools')
         parser.add_argument('-i', '--get-ip', action='store_true', help='output ip to stdout before executing action',
                             dest='ip')
+        parser.add_argument('-r', '--remote', action='store_true', help='execute this command on remote server',
+                            dest='remote')
         logging_group = parser.add_argument_group("logging")
         logging_group.add_argument('-s', '--stream', action='store_true', help='activate logging to stdout (default False)',
                                    dest='stream')
@@ -526,8 +534,8 @@ class QsubCommandline(object):
 
 
 class RemoteQsubCommandline(QsubCommandline):
-    def __init__(self, command):
-        self.command = command
+    def __init__(self, commands):
+        self.command = commands
         self.ssh = self.setup_ssh_instance()
         super(RemoteQsubCommandline, self).__init__()
 
@@ -562,17 +570,19 @@ class RemoteQsubCommandline(QsubCommandline):
         self.ssh.sendline(self.command)
 
     def ssh_expect(self, pattern):
-        idx = self.ssh.expect(['^error:', pattern])
+        patterns = ['error:', pattern]
+        idx = self.ssh.expect(patterns)
+        self.data[patterns[idx].strip(':')] = json.loads(self.ssh.readline())
         if idx == 0:
-            raise self.CommandLineException(self.ssh.after)
-        self.data[re.strip('[^$:]', pattern)] = json.loads(self.ssh.after)
+            raise self.CommandLineException('in {0}\n\t{1}'.format(self.get_exec_func().im_func.func_name,
+                                                                   self.data['error']))
 
     def post_execute(self):
         if self.args.ip:
-            self.ssh_expect('^ip:')
+            self.ssh_expect('ip:')
 
-
-
+        if not self.blocking():
+            self.ssh_expect('return:')
 
     @staticmethod
     def setup_ssh_instance():
