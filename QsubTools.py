@@ -23,6 +23,7 @@ import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 import logging
 import sys
+import json
 from copy import copy
 from time import sleep
 
@@ -130,14 +131,6 @@ class QsubClient(object):
     def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules=None):
         qsub_gen = QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
         return qsub_gen.get_instance_class()
-
-
-    @staticmethod
-    def setup_ssh_server():
-        s = open_ssh_session_to_server()
-        s.sendline('cd {0}'.format(WORKDIR))
-        s.prompt()
-        return s
 
     def isup_manager(self):
         self.ssh.sendline("python QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
@@ -421,15 +414,27 @@ class QsubExecutor(object):
 
 class QsubCommandline(object):
     def __init__(self):
-        self.my_ip = QsubManager.get_ip()
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
-        self.args = self.get_argument_parser().parse_args()
+        self.args = self.parse_args()
         self.logger = self.create_logger()
-        if self.args.ip:
-            self.stdout('ip', self.my_ip)
 
+        self.data = dict()
+
+        self.pre_execute()
+        self.execute()
+        self.post_execute()
+
+    def parse_args(self, *args):
+        return self.get_argument_parser().parse_args()
+
+    def pre_execute(self):
+        self.data['ip'] = self.get_ip()
+        if self.args.ip:
+            self.stdout('ip', self.data['ip'])
+
+    def execute(self):
         try:
             self.args2method[self.args.module][self.args.action]()
         except Exception as e:
@@ -437,7 +442,14 @@ class QsubCommandline(object):
                               exc_info=True)
             self.stdout('error', e.message)
 
-    def create_logger(self):
+    def post_execute(self):
+        pass
+
+    @staticmethod
+    def get_ip():
+        return QsubManager.get_ip()
+
+    def get_logger_args(self):
         kwargs = dict()
         kwargs["log_to_stream"] = self.args.stream
         if self.args.logfiles is False:
@@ -448,20 +460,25 @@ class QsubCommandline(object):
         kwargs["loggername"] = 'CLI/{0} {1}'.format(self.args.action, self.args.module)
         if self.args.log_level:
             kwargs['log_level'] = self.args.log_level
+        return kwargs
+
+    def create_logger(self):
+        kwargs = self.get_logger_args()
         return create_logger(**kwargs)
 
-    def stdout(self, tag, message):
-        print "{0}: {1}".format(tag, message)
+    @staticmethod
+    def stdout(tag, obj):
+        print "{0}: {1}".format(tag, json.dumps(obj))
 
     def get_manager(self):
-        return Pyro4.Proxy("PYRO:qsub.manager@{0}:{1}".format(self.my_ip, QSUB_MANAGER_PORT))
+        return Pyro4.Proxy("PYRO:qsub.manager@{0}:{1}".format(self.data['ip'], QSUB_MANAGER_PORT))
 
     def execute_return(self, result):
         self.stdout('return', result)
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
-        daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT, host=self.my_ip)
+        daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT, host=self.data['ip'])
         self.logger.debug("Init Manager")
         manager = QsubManager()
         daemon.register(manager, "qsub.manager")
@@ -481,7 +498,7 @@ class QsubCommandline(object):
             self.execute_return(False)
 
     @staticmethod
-    def get_argument_parser(self):
+    def get_argument_parser():
         parser = ArgumentParser('Command line interface to QsubTools')
         parser.add_argument('-i', '--get-ip', action='store_true', help='output ip to stdout before executing action',
                             dest='ip')
@@ -502,6 +519,67 @@ class QsubCommandline(object):
         parser.add_argument('action', choices=['start', 'stop', 'isup'], help="action to send to module")
         parser.add_argument('module', choices=['manager'], help="module to send action to")
         return parser
+
+    @staticmethod
+    class CommandLineException(Exception):
+        pass
+
+
+class RemoteQsubCommandline(QsubCommandline):
+    def __init__(self, command):
+        self.command = command
+        self.ssh = self.setup_ssh_instance()
+        super(RemoteQsubCommandline, self).__init__()
+
+    def parse_args(self):
+        return self.get_argument_parser().parse_args(self.command.split())
+
+    def create_logger(self):
+        return DummyLogger()
+
+    def blocking(self):
+        if self.args.action == 'start':
+            return True
+        return False
+
+    def pre_execute(self):
+        if self.args.stream:
+            self.ssh.logfile = sys.stdout
+
+        blocking = self.blocking()
+        full_command = ""
+        if blocking:
+            full_command += 'nohup '
+
+        full_command += "python QsubTools.py "
+        full_command += self.command
+
+        if blocking:
+            full_command += ' &'
+        self.command = full_command
+
+    def execute(self):
+        self.ssh.sendline(self.command)
+
+    def ssh_expect(self, pattern):
+        idx = self.ssh.expect(['^error:', pattern])
+        if idx == 0:
+            raise self.CommandLineException(self.ssh.after)
+        self.data[re.strip('[^$:]', pattern)] = json.loads(self.ssh.after)
+
+    def post_execute(self):
+        if self.args.ip:
+            self.ssh_expect('^ip:')
+
+
+
+
+    @staticmethod
+    def setup_ssh_instance():
+        s = open_ssh_session_to_server()
+        s.sendline('cd {0}'.format(WORKDIR))
+        s.prompt()
+        return s
 
 if __name__ == "__main__":
     QsubCommandline()
