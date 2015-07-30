@@ -487,7 +487,6 @@ class QsubCommandline(object):
         self.logger.debug("Init Manager")
         manager = QsubManager()
         daemon.register(manager, "qsub.manager")
-        self.stdout('blocking', datetime.datetime.now().isoformat())
         self.logger.info("putting manager in request loop")
         self.stdout('blocking', datetime.datetime.now().isoformat())
         daemon.requestLoop(loopCondition=manager.is_alive)
@@ -579,13 +578,14 @@ class RemoteQsubCommandline(QsubCommandline):
     def ssh_expect(self, pattern):
         patterns = ['error:', pattern]
         idx = self.ssh.expect(patterns)
+        line = self.ssh.readline().strip('[\n\r :]')
         if idx == 0:
-            self.data['error'] = self.ssh.readline()
+            self.data['error'] = line
             sleep(.5)
             raise self.CommandLineException('in {0}\n\t{1}'.format(self.get_exec_func().im_func.func_name,
                                                                    self.data['error']))
         else:
-            self.data[patterns[idx].strip(':')] = json.loads(self.ssh.readline())
+            self.data[patterns[idx].strip(':')] = json.loads(line)
 
     def post_execute(self):
         if self.args.ip:
@@ -593,9 +593,11 @@ class RemoteQsubCommandline(QsubCommandline):
 
         if not self.blocking():
             self.ssh_expect('return:')
+            self.ssh.logout()
+            self.ssh.terminate()
         else:
             self.ssh_expect('blocking')
-            self.ssh.logout()
+            self.ssh.terminate()
 
     @staticmethod
     def setup_ssh_instance():
