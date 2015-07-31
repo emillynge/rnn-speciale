@@ -18,7 +18,6 @@ from subprocess import Popen, PIPE
 
 FNULL = open('/dev/null', 'w')
 from argparse import ArgumentParser
-from threading import Thread
 import re
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
@@ -45,16 +44,17 @@ def open_ssh_session_to_server():
     return s
 
 
-def create_logger(loggername="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG', formatstr=None):
+def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG',
+                  format_str=None):
     if not log_to_file and not log_to_stream:   # neither stream nor logfile specified. no logger wanted.
         return DummyLogger()
     # create logger with 'spam_application'
-    _logger = logging.getLogger(loggername)
+    _logger = logging.getLogger(logger_name)
     _logger.setLevel(log_level)
     # create formatter and add it to the handlers
-    if not formatstr:
-        formatstr = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    formatter = logging.Formatter(formatstr)
+    if not format_str:
+        format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    formatter = logging.Formatter(format_str)
 
     if log_to_file:
         if not isinstance(log_to_file, list):
@@ -113,19 +113,21 @@ HPC_Time.__new__.__defaults__ = (0, 0, 0)
 HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'pvmem', 'vmem'])
 HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
 
+
 class QsubClient(object):
     def __init__(self, restart_manager=False):
         self.max_retry = 3
         self.logger = create_logger("Client")
 
-        self.manager_ip, hot_start = RemoteQsubCommandline('-i isup manager').data.fromkeys(['ip', 'result'])
+        self.manager_ip, hot_start = RemoteQsubCommandline('-i isup manager').get('ip', 'return')
         if not hot_start:
-            self.init_manager()
+            self.start_manager()
 
-        self.manager_ssh_server, self.manager_client_port = make_tunnel(5000)
+        self.manager_ssh_server, self.manager_client_port = make_tunnel(5000, server_host=self.manager_ip)
         self.manager = self.get_manager()
         self.manager.is_alive()
-        self.logger.debug("Successfully connected to Qsub manager on local port {0}".format(self.manager_client_port))
+        self.logger.debug("Successfully connected to Qsub manager on  {1}:{0}".format(self.manager_client_port,
+                                                                                      self.manager_ip))
 
         if restart_manager and hot_start:
             self.restart_manager()
@@ -134,37 +136,29 @@ class QsubClient(object):
         qsub_gen = QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
         return qsub_gen.get_instance_class()
 
-    def isup_manager(self):
-        self.ssh.sendline("python QsubTools.py isup manager".format(WORKDIR, SERVER_PYTHON_BIN))
-        self.ssh.prompt()
-        msg = self.ssh.before
-        if "False" in msg:
-            self.logger.debug("Manager down")
-            return False
-        elif "True" in msg:
-            self.logger.debug("Manager up")
-            return True
-        else:
-            raise Exception(msg)
-
-    def init_manager(self, retries=0):
-        timeout = retries * 2
-        RemoteQsubCommandline('init manager')
-        sleep(timeout)
-        if not self.isup_manager():
-            self.logger.info("Manager still not up after init")
-            if retries > self.max_retry:
-                self.logger.error("Giving up on initializing manager after {0} tries".format(self.max_retry))
-            else:
-                self.init_manager(retries=retries + 1)
+    def start_manager(self):
+        self.manager_ip = RemoteQsubCommandline('-i start manager').get('ip')
+        # timeout = retries * 2
+        # RemoteQsubCommandline('init manager')
+        # sleep(timeout)
+        # if not self.isup_manager():
+        #     self.logger.info("Manager still not up after init")
+        #     if retries > self.max_retry:
+        #         self.logger.error("Giving up on initializing manager after {0} tries".format(self.max_retry))
+        #     else:
+        #         self.start_manager(retries=retries + 1)
 
     def get_manager(self):
-        return Pyro4.Proxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port))
+        return Pyro4.Proxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port, self.manager_ip))
 
     def restart_manager(self):
         self.manager.shutdown()
-        sleep(Pyro4.config.COMMTIMEOUT)
-        self.init_manager()
+        try:
+            while True:
+                self.manager.is_alive()
+        except pyro_errors.CommunicationError:
+            pass
+        self.start_manager()
         self.logger.info("Manager restarted")
 
 
@@ -294,7 +288,7 @@ class QsubGenerator(object):
                 raise InvalidQsubArguments("Required module {0} is not available".format(module))
             if version and version not in self.available_modules[module]:
                 raise InvalidQsubArguments("Required module version {0} is not available for module {1}".format(version,
-                                                                                                              module))
+                                                                                                                module))
             self.logger.debug("module {0}, version {1} is available".format(module, version if version else "default"))
 
     def get_instance_class(self):
@@ -325,8 +319,8 @@ class SubmissionScript(object):
 
     def generate(self, execute_commands, log_file):
         script = '\n'.join(self.lines) + '\n'
-        script += self.make_PBS('e', log_file + ".e") + '\n'
-        script += self.make_PBS('o', log_file + ".o") + '\n'
+        script += self.make_pbs_pragma('e', log_file + ".e") + '\n'
+        script += self.make_pbs_pragma('o', log_file + ".o") + '\n'
 
         for module_name, version in self.modules.iteritems():
             script += 'module load ' + module_name
@@ -342,35 +336,35 @@ class SubmissionScript(object):
             script += execute_commands
         return script
 
-    def make_PBS(self, flag, line):
-        assert isinstance(line, (str, unicode))
+    @staticmethod
+    def make_pbs_pragma(flag, line):
         return "#PBS -" + flag.strip(' ') + ' ' + line
 
-    def append_PBS(self, flag, line):
-        self.lines.append(self.make_PBS(flag, line))
+    def append_pbs_pragma(self, flag, line):
+        self.lines.append(self.make_pbs_pragma(flag, line))
 
     def name(self, name):
-        self.append_PBS('N ', name)
+        self.append_pbs_pragma('N ', name)
 
     def mail(self, mail_address):
-        self.append_PBS('m', mail_address)
+        self.append_pbs_pragma('m', mail_address)
 
     def resources(self, resources):
         assert isinstance(resources, HPC_resources)
-        self.append_PBS('l', 'nodes={1}:ppn={0}'.format(resources.ppn, resources.nodes))
+        self.append_pbs_pragma('l', 'nodes={1}:ppn={0}'.format(resources.ppn, resources.nodes))
 
         if resources.gpus:
-            self.append_PBS('l', 'gpus={0}'.format(resources.gpus))
+            self.append_pbs_pragma('l', 'gpus={0}'.format(resources.gpus))
 
         if resources.pvmem:
-            self.append_PBS('l', 'pvmem={0}'.format(resources.pvmem))
+            self.append_pbs_pragma('l', 'pvmem={0}'.format(resources.pvmem))
 
         if resources.vmem:
-            self.append_PBS('l', 'vmem={0}'.format(resources.vmem))
+            self.append_pbs_pragma('l', 'vmem={0}'.format(resources.vmem))
 
     def wallclock(self, wallclock):
         assert isinstance(wallclock, HPC_Time)
-        self.append_PBS("l", "walltime={0}:{1}:{2}".format(wallclock.h, wallclock.m, wallclock.s))
+        self.append_pbs_pragma("l", "walltime={0}:{1}:{2}".format(wallclock.h, wallclock.m, wallclock.s))
 
 
 class BaseQsubInstance(object):
@@ -378,15 +372,21 @@ class BaseQsubInstance(object):
         self.args = args
         self.kwargs = kwargs
         self.qsub_manager = self.set_manager()
+        self.qsub_client = self.set_qsub_client()
         self.submission_script = self.set_submission_script()
         self.qsub_generator = self.set_qsub_generator()
         (self.sub_id, self.logfile) = self.qsub_manager.request_submission()
 
     def stage_submission(self):
-        exe = """python -c "from {0} import {1}; from QsubTools import QsubExecutor; QsubExecutor({1}, {2}, '{3}')" """.format(
+        exe = """python -c "from {0} import {1}; from QsubTools import QsubExecutor;
+        QsubExecutor({1}, {2}, '{3}')" """.format(
             self.qsub_generator.package, self.qsub_generator.module, self.sub_id, self.qsub_manager.get_ip())
         script = self.submission_script.generate(exe, self.logfile)
         self.qsub_manager.stage_submission(self.sub_id, script)
+
+    @staticmethod
+    def set_qsub_client():
+        return QsubClient()
 
     @staticmethod
     def set_manager():
@@ -398,7 +398,8 @@ class BaseQsubInstance(object):
 
     @staticmethod
     def set_qsub_generator():
-        return QsubGenerator()
+        return QsubGenerator(qsub_manager=None, package=None, module=None, wallclock=HPC_Time(),
+                             resources=HPC_resources(), rel_dir="", additional_modules={})
 
 
 class QsubExecutor(object):
@@ -415,7 +416,7 @@ class QsubCommandline(object):
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager}}
-        self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, formatstr='%(message)s')
+        self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, format_str='%(message)s')
         self.args = self.parse_args()
         if self.args.remote:
             self.data = RemoteQsubCommandline(' '.join([arg for arg in sys.argv[1:] if arg not in ['-r', '--remote']]))
@@ -427,6 +428,9 @@ class QsubCommandline(object):
             self.pre_execute()
             self.execute()
             self.post_execute()
+
+    def get(self, *args):
+        return tuple(self.data[key] for key in args)
 
     def parse_args(self, *args):
         return self.get_argument_parser().parse_args()
@@ -443,7 +447,8 @@ class QsubCommandline(object):
         try:
             self.get_exec_func().__call__()
         except Exception as e:
-            self.logger.error("Exception ocurred during execution of {0} {1}".format(self.args.action, self.args.module),
+            self.logger.error("Exception occurred during execution of {0} {1}".format(self.args.action,
+                                                                                      self.args.module),
                               exc_info=True)
             sleep(.5)
             self.stdout('error', e.message)
@@ -463,7 +468,7 @@ class QsubCommandline(object):
         else:
             if self.args.logfiles:
                 kwargs['log_to_file'] = self.args.logfiles
-        kwargs["loggername"] = 'CLI/{0} {1}'.format(self.args.action, self.args.module)
+        kwargs["logger_name"] = 'CLI/{0} {1}'.format(self.args.action, self.args.module)
         if self.args.log_level:
             kwargs['log_level'] = self.args.log_level
         return kwargs
@@ -511,26 +516,46 @@ class QsubCommandline(object):
     @staticmethod
     def get_argument_parser():
         parser = ArgumentParser('Command line interface to QsubTools')
-        parser.add_argument('-i', '--get-ip', action='store_true', help='output ip to stdout before executing action',
+        parser.add_argument('-i', '--get-ip',
+                            action='store_true',
+                            help='output ip to stdout before executing action',
                             dest='ip')
-        parser.add_argument('-r', '--remote', action='store_true', help='execute this command on remote server',
+
+        parser.add_argument('-r', '--remote',
+                            action='store_true',
+                            help='execute this command on remote server',
                             dest='remote')
+
         logging_group = parser.add_argument_group("logging")
-        logging_group.add_argument('-s', '--stream', action='store_true', help='activate logging to stdout (default False)',
+        logging_group.add_argument('-s', '--stream', action='store_true',
+                                   help='activate logging to stdout (default False)',
                                    dest='stream')
 
-        logging_group.add_argument('-L', '--log-level', choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'], help='log level',
+        logging_group.add_argument('-L', '--log-level',
+                                   choices=['ERROR', 'WARNING', 'INFO', 'DEBUG'],
+                                   help='log level',
                                    dest='log_level')
 
+        # Logfile specification
         logfile_group = logging_group.add_mutually_exclusive_group()
-        logfile_group.add_argument('-f', '--file', action='append', help='specify logging to specific file(s).',
+        logfile_group.add_argument('-f', '--file',
+                                   action='append',
+                                   help='specify logging to specific file(s).',
                                    dest='logfiles', nargs='+')
 
-        logfile_group.add_argument('-F', '--disable-file', action='store_false', help='disable logging to file',
+        logfile_group.add_argument('-F', '--disable-file',
+                                   action='store_false',
+                                   help='disable logging to file',
                                    dest='logfiles')
 
-        parser.add_argument('action', choices=['start', 'stop', 'isup'], help="action to send to module")
-        parser.add_argument('module', choices=['manager'], help="module to send action to")
+        # Required arguments
+        parser.add_argument('action',
+                            choices=['start', 'stop', 'isup'],
+                            help="action to send to module")
+
+        parser.add_argument('module',
+                            choices=['manager'],
+                            help="module to send action to")
         return parser
 
     @staticmethod
