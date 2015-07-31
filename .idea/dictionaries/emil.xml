@@ -11,15 +11,19 @@
       <w>isup</w>
       <w>levelname</w>
       <w>logdir</w>
+      <w>logfiles</w>
       <w>modulefiles</w>
+      <w>nohup</w>
       <w>pvmem</w>
       <w>pyro</w>
       <w>qsub</w>
       <w>qsubs</w>
       <w>speciale</w>
+      <w>stdout</w>
       <w>submodule</w>
       <w>vmem</w>
       <w>wallclock</w>
+      <w>walltime</w>
       <w>workdir</w>
       <w>zhome</w>
     </words>
