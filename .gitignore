@@ -129,7 +129,7 @@ target/
 *-test.py
 
 .gitignore
-.idea
+.idea/*
 rnn-speciale.iml
 Theano
 pycuda
