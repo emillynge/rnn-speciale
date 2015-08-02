@@ -27,10 +27,29 @@ import sys
 import json
 from copy import copy
 from time import sleep
+from importlib import import_module
 
 Pyro4.config.COMMTIMEOUT = 5.0  # without this daemon.close() hangs
 
 from collections import namedtuple, defaultdict
+
+class InvalidUserInput(Exception):
+    def __init__(self, argname, expected, found, *args, **kwargs):
+        self.data = {'expected': expected,
+                     'found': found,
+                     'argname': argname,
+                     'message': '\n\t' + args[0] if args else ""}
+        new_args = tuple([self.message] + list(args[1:]))
+
+        super(InvalidUserInput, self).__init__(*new_args, **kwargs)
+
+    @property
+    def super_message(self):
+        return super(InvalidUserInput, self).message
+
+    @property
+    def message(self):
+        return 'This method requires "{argname}" to be "{expected}", but got "{found}"{message}'.format(**self.data)
 
 
 class InvalidQsubArguments(Exception):
@@ -133,8 +152,11 @@ class QsubClient(object):
         if restart_manager and hot_start:
             self.restart_manager()
 
-    def generator(self, package, module, wallclock, resources, rel_dir="", additional_modules=None):
-        qsub_gen = QsubGenerator(self.manager, package, module, wallclock, resources, rel_dir, additional_modules)
+    def generator(self, cls, wallclock, resources, rel_dir="", additional_modules=None):
+        if not isinstance(cls, tuple):
+            if str(cls.__class__) != "<type 'type'>":
+                pass
+        qsub_gen = QsubGenerator(self.manager, cls, wallclock, resources, rel_dir, additional_modules)
         return qsub_gen.get_instance_class()
 
     def start_manager(self):
@@ -328,8 +350,9 @@ class SubmissionScript(object):
             if version:
                 script += '/' + version
             script += '\n'
-
+        script += "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:{0}/lib\n".format(WORKDIR)
         script += 'cd {0}\n'.format(self.wd)
+
 
         if isinstance(execute_commands, list):
             script += '\n'.join(execute_commands)
@@ -348,7 +371,8 @@ class SubmissionScript(object):
         self.append_pbs_pragma('N ', name)
 
     def mail(self, mail_address):
-        self.append_pbs_pragma('m', mail_address)
+        self.append_pbs_pragma('M', mail_address)
+        self.append_pbs_pragma('m', 'a')
 
     def resources(self, resources):
         assert isinstance(resources, HPC_resources)
