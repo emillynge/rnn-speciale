@@ -1,13 +1,25 @@
 from subprocess import call, Popen, PIPE
 from argparse import ArgumentParser
-from QsubTools import WORKDIR
+from QsubTools import WORKDIR, SITE_PACKAGE_DIR
 import os
 import re
 
-BUILD_COMMANDS = {'Theano': [['python', 'setup.py', 'build']],
-                  'nntools': [['python', 'setup.py', 'build']],
+BUILD_COMMANDS = {'Theano': [['python', 'setup.py', 'build'],
+                             ['rm', '-rf', SITE_PACKAGE_DIR + '/theano'],
+                             ['cp', '-rf', 'build/lib/theano', SITE_PACKAGE_DIR + '/theano']],
+                  'nntools': [['python', 'setup.py', 'build'],
+                              ['rm', '-rf', SITE_PACKAGE_DIR + '/nntools'],
+                              ['cp', '-rf', 'build/lib/nntools', SITE_PACKAGE_DIR + '/nntools']],
+                  'skaae': [['python', 'setup.py', 'build'],
+                            ['rm', '-rf', SITE_PACKAGE_DIR + '/skaae'],
+                            ['cp', '-rf', 'build/lib/lasagne', SITE_PACKAGE_DIR + '/lasagne']],
                   'pycuda': [['git', 'submodule', 'update', '--init'],
-                             'rm ./']}
+                             ['rm ', '-f', 'siteconfig.py'],
+                             ['python', 'configure.py', '--cudadrv-lib-dir=' + WORKDIR + '/lib'],
+                             ['python', 'setup.py', 'build'],
+                             ['rm', '-rf', SITE_PACKAGE_DIR + '/pycuda'],
+                             ['cp', '-rf', 'build/lib.linux-x86_64-2.7/pycuda', SITE_PACKAGE_DIR + '/pycuda']],
+                  }
 
 parser = ArgumentParser(description="update git submodules and optionally recompile")
 parser.add_argument('--sub-modules',
@@ -46,7 +58,8 @@ def read_gitmodules():
                 header = _header[0]
                 submodules[header] = {'url': None,
                                       'path': None,
-                                      'branch': 'master'}
+                                      'branch': 'master',
+                                      'name': header}
             else:
                 field, val = regexp_field_val.findall(line)[0]
                 submodules[header][field] = val
@@ -72,9 +85,8 @@ def check_submodules(k_sm, p_sm):
 def build_module(submodule):
     os.chdir(submodule['path'])
     try:
-        files = os.listdir()
-        if 'configure.py' in files:
-            p_call(['python', 'setup.py'])
+        for cmd in BUILD_COMMANDS[submodule['name']]:
+            p_call(cmd)
     finally:
         os.chdir('../')
 

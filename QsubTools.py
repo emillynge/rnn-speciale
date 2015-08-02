@@ -4,6 +4,7 @@ import datetime
 __author__ = 'emil'
 USER = "s082768@student.dtu.dk"
 WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale"
+SITE_PACKAGE_DIR = "zhome/25/2/51526/.local/lib/python2.7/site-packages"
 LOGDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/qsub/logs"
 SERVER_PYTHON_BIN = "/usr/local/gbar/apps/python/2.7.1/bin/python"
 SERVER_MODULE_BIN = "/apps/dcc/bin/module"
