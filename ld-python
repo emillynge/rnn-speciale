@@ -1,0 +1,4 @@
+#!/bin/sh
+cdir=`pwd`
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:cdir/lib
+exec python ${1+"$@"}
