@@ -131,6 +131,8 @@ def get_libs():
     c_dir = os.path.abspath('.')
     p_call(['ln', '-s', c_dir + '/lib/libcuda.so', c_dir + '/lib/libcuda.so.1'])
 
+    print('fetched ')
+
 
 if __name__ == "__main__":
     args = parser.parse_args()
@@ -142,11 +144,16 @@ if __name__ == "__main__":
     else:
         pull_submodules = known_submodules.keys()
 
+    if args.fetch_libs:
+        get_libs()
+
     for sm in pull_submodules:
         sm_info = known_submodules[sm]
         pull_submodule(sm_info)
         if (sm_info.get('rebuild', False) and args.rebuild) or args.force_rebuild:
             build_module(sm_info)
+
+
 
 
 
