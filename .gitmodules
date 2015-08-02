@@ -1,14 +1,14 @@
 [submodule "Theano"]
-	path = Theano
+	path = git-Theano
 	url = git://github.com/Theano/Theano.git
 [submodule "skaae"]
-	path = skaae
+	path = git-skaae
 	url = https://github.com/skaae/nntools
 	branch = pentree_recurrent
 [submodule "nntools"]
-	path = nntools
+	path = git-nntools
 	url = https://github.com/craffel/nntools.git
 	branch = recurrent
 [submodule "pycuda"]
-	path = pycuda
+	path = git-pycuda
 	url = http://git.tiker.net/trees/pycuda.git
