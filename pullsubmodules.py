@@ -92,6 +92,7 @@ def build_module(submodule):
 
 
 def p_call(command):
+    print('calling: {0}'.format(' '.join(command)))
     p = Popen(command, stdout=PIPE, stderr=PIPE)
     while p.poll() is None:
         out_line = p.stdout.readline()
