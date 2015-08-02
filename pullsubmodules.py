@@ -142,7 +142,7 @@ if __name__ == "__main__":
     else:
         pull_submodules = known_submodules.keys()
 
-    for sm in pull_submodules:
+    for sm in pull_submodules.values():
         pull_submodule(known_submodules[sm])
         if (sm.get('rebuild', False) and args.rebuild) or args.force_rebuild:
             build_module(sm)
