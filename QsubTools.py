@@ -23,6 +23,8 @@ import re
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 import logging
+from boltons import tbutils
+import traceback
 import sys
 import json
 from copy import copy
@@ -33,15 +35,45 @@ Pyro4.config.COMMTIMEOUT = 5.0  # without this daemon.close() hangs
 
 from collections import namedtuple, defaultdict
 
+
 class InvalidUserInput(Exception):
-    def __init__(self, argname, expected, found, *args, **kwargs):
+    def __init__(self, argname, expected, found, message, equal=True, indent=3, **kwargs):
+        calling_frame = sys._getframe(indent)
+        method_frame = sys._getframe(indent - 1)
+
+        tb = tbutils.TracebackInfo.from_frame(frame=calling_frame, limit=1)
+        tb_str = tb.get_formatted()
+        declaration, input_args, method_name = self.get_declaration(method_frame)
+
         self.data = {'expected': expected,
                      'found': found,
                      'argname': argname,
-                     'message': '\n\t' + args[0] if args else ""}
-        new_args = tuple([self.message] + list(args[1:]))
+                     'method_name': method_name,
+                     'pre_message': tb_str[34:] if tb_str else "",
+                     'message': message,
+                     'declaration': declaration,
+                     'input_args': input_args,
+                     'arg_no': input_args.index(argname),
+                     'should': 'to be' if equal else 'not to be'}
 
-        super(InvalidUserInput, self).__init__(*new_args, **kwargs)
+        super(InvalidUserInput, self).__init__(self.message, **kwargs)
+
+    def get_declaration(self, frame):
+        lno = frame.f_code.co_firstlineno
+        with open(frame.f_code.co_filename) as fp:
+            for k in range(lno-1):
+                fp.readline()
+
+            declaration_buffer = fp.readline()
+            while '):' not in declaration_buffer:
+                declaration_buffer += fp.readline()
+
+            print declaration_buffer
+            input_str = re.findall('def\W+{0}\((.+)\):'.format(frame.f_code.co_name),
+                                   declaration_buffer, re.DOTALL)[0]
+            declaration_str = re.findall('def\W+({0}\(.+?\)):'.format(frame.f_code.co_name), declaration_buffer)[0]
+
+        return declaration_str, self.parse_input_str(input_str), frame.f_code.co_name
 
     @property
     def super_message(self):
@@ -49,15 +81,58 @@ class InvalidUserInput(Exception):
 
     @property
     def message(self):
-        return 'This method requires "{argname}" to be "{expected}", but got "{found}"{message}'.format(**self.data)
+        return """Invalid input to {declaration}{pre_message}\t{method_name} requires argument {arg_no} "{argname}" {should} "{expected}", but got "{found}"
+        {message}""".format(**self.data)
 
+    @staticmethod
+    def compare(argname, expect, found, message="", equal=True):
+        if equal:
+            assert_true = expect == found
+        else:
+            assert_true = expect != found
+
+        if not assert_true:
+            raise InvalidUserInput(argname, expect, found, message, equal=equal)
+
+    @staticmethod
+    def parse_input_str(input_str):
+        quotes = defaultdict(int)
+        input_args = list()
+        curr_arg = ""
+        for char in input_str:
+            if char in '([{':
+                quotes[char] += 1
+                continue
+
+            if char in ')]}':
+                quotes[char] -= 1
+                if quotes[char] == 0:
+                    del(quotes[char])
+                continue
+
+            if char in '\n\r\t':
+                continue
+
+            if char == ',' and not quotes:
+                input_args.append(curr_arg)
+                curr_arg = ''
+                continue
+
+            curr_arg += char
+        input_args.append(curr_arg)
+        return [a.strip(' ') for a in input_args]
 
 class InvalidQsubArguments(Exception):
     pass
 
 
+def import_obj_from(module_name, obj_name):
+    return import_module(module_name).__dict__[obj_name]
+
+
 def open_ssh_session_to_server():
     import pxssh
+
     s = pxssh.pxssh()
     if not s.login(SSH_HOST, SSH_USERNAME, ssh_key=SSH_PRIVATE_KEY):
         raise pxssh.ExceptionPxssh('Login failed')
@@ -66,7 +141,7 @@ def open_ssh_session_to_server():
 
 def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG',
                   format_str=None):
-    if not log_to_file and not log_to_stream:   # neither stream nor logfile specified. no logger wanted.
+    if not log_to_file and not log_to_stream:  # neither stream nor logfile specified. no logger wanted.
         return DummyLogger()
     # create logger with 'spam_application'
     _logger = logging.getLogger(logger_name)
@@ -132,6 +207,7 @@ HPC_Time = namedtuple("Time", ['h', 'm', 's'])
 HPC_Time.__new__.__defaults__ = (0, 0, 0)
 HPC_resources = namedtuple("Resource", ['nodes', 'ppn', 'gpus', 'pvmem', 'vmem'])
 HPC_resources.__new__.__defaults__ = (1, 1, 0, None, None)
+ClassInfo = namedtuple('ClassInfo', ['module', 'class_name'])
 
 
 class QsubClient(object):
@@ -154,8 +230,10 @@ class QsubClient(object):
 
     def generator(self, cls, wallclock, resources, rel_dir="", additional_modules=None):
         if not isinstance(cls, tuple):
-            if str(cls.__class__) != "<type 'type'>":
-                pass
+            InvalidUserInput.compare('cls', "<type 'type'>", str(cls.__class__),
+                                     message="Input should be uninstantiated class")
+            cls = ClassInfo(module=cls.__module__, name=cls.__name__)
+
         qsub_gen = QsubGenerator(self.manager, cls, wallclock, resources, rel_dir, additional_modules)
         return qsub_gen.get_instance_class()
 
@@ -165,7 +243,7 @@ class QsubClient(object):
         # RemoteQsubCommandline('init manager')
         # sleep(timeout)
         # if not self.isup_manager():
-        #     self.logger.info("Manager still not up after init")
+        # self.logger.info("Manager still not up after init")
         #     if retries > self.max_retry:
         #         self.logger.error("Giving up on initializing manager after {0} tries".format(self.max_retry))
         #     else:
@@ -255,7 +333,7 @@ class QsubManager(object):
 
 
 class QsubGenerator(object):
-    def __init__(self, qsub_manager, package, module, wallclock, resources, rel_dir, additional_modules):
+    def __init__(self, qsub_manager, cls, wallclock, resources, rel_dir, additional_modules):
         assert isinstance(wallclock, HPC_Time)
         assert isinstance(resources, HPC_resources)
         assert isinstance(qsub_manager, (QsubManager, Pyro4.Proxy))
@@ -266,8 +344,7 @@ class QsubGenerator(object):
         self.modules = copy(BASE_MODULES)
         self.base_dir = WORKDIR
         self.rel_dir = rel_dir
-        self.package = package
-        self.module = module
+        self.cls = cls
         self.manager_ip = qsub_manager.get_ip()
         self.resources = resources
         self.wc_time = wallclock
@@ -297,7 +374,7 @@ class QsubGenerator(object):
         ss = SubmissionScript(self.work_dir, self.modules)
         ss.resources(self.resources)
         ss.wallclock(self.wc_time)
-        ss.name('{0}.{1}'.format(self.package, self.module))
+        ss.name('.'.join(self.cls))
         ss.mail(SSH_USERNAME + '@student.dtu.dk')
         return ss
 
@@ -352,7 +429,6 @@ class SubmissionScript(object):
             script += '\n'
         script += "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:{0}/lib\n".format(WORKDIR)
         script += 'cd {0}\n'.format(self.wd)
-
 
         if isinstance(execute_commands, list):
             script += '\n'.join(execute_commands)
@@ -655,6 +731,7 @@ class RemoteQsubCommandline(QsubCommandline):
         s.sendline('cd {0}'.format(WORKDIR))
         s.prompt()
         return s
+
 
 if __name__ == "__main__":
     QsubCommandline()
