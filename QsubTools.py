@@ -276,7 +276,7 @@ class QsubClient(object):
         #         self.start_manager(retries=retries + 1)
 
     def get_manager(self):
-        return Pyro4.Proxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port, self.manager_ip))
+        return QsubProxy("PYRO:qsub.manager@localhost:{0}".format(self.manager_client_port, self.manager_ip))
 
     def restart_manager(self):
         self.manager.shutdown()
@@ -659,26 +659,31 @@ def init_server_execution(module, cls, sub_id, manager_ip, local_ip, logger=None
     args, kwargs = manager.request_execution_args(sub_id)
     obj = import_obj_from(module, cls)(*args, **kwargs)
     wrapped_object = ServerExecutionWrapper(obj)
-    daemon = Daemon(host=local_ip)
+    daemon = QsubDaemon(host=local_ip)
     port = daemon.locationStr.split(':')[-1]
     proxy_name = 'qsub.execution.{0}'.format(sub_id)
     daemon.register(wrapped_object, proxy_name)
     controller = ExecutionController(logger)
     daemon.register(controller, 'qsub.execution.controller')
     manager.set_proxy_info(sub_id, local_ip, port, proxy_name)
-
-    def get_metadata(daemon_obj, objectId):
-        obj = daemon_obj.daemon.objectsById.get(objectId)
-        if obj is not None:
-            if hasattr(obj, 'QSUB_metadata'):
-                return getattr(obj, 'QSUB_metadata')
-            return Pyro4.util.get_exposed_members(obj, only_exposed=Pyro4.config.REQUIRE_EXPOSE)
-        else:
-            Pyro4.core.log.debug("unknown object requested: %s", objectId)
-            raise Pyro4.errors.DaemonError("unknown object")
-
-    setattr(daemon.objectsById['Pyro.Daemon'], 'get_metadata', get_metadata)
     daemon.requestLoop(controller.is_alive)
+
+class QsubDaemon(Pyro4.Daemon):
+    def __init__(self, *args, **kwargs):
+        super(QsubDaemon, self).__init__(self, *args, **kwargs)
+
+        def get_metadata(daemon_obj, objectId):
+            obj = daemon_obj.daemon.objectsById.get(objectId)
+            if obj is not None:
+                if hasattr(obj, 'QSUB_metadata'):
+                    return getattr(obj, 'QSUB_metadata')
+                return Pyro4.util.get_exposed_members(obj, only_exposed=Pyro4.config.REQUIRE_EXPOSE)
+            else:
+                Pyro4.core.log.debug("unknown object requested: %s", objectId)
+                raise Pyro4.errors.DaemonError("unknown object")
+
+        setattr(self.objectsById['Pyro.Daemon'], 'get_metadata', get_metadata)
+
 
 class ServerExecutionWrapper(object):
     def __init__(self, obj):
@@ -703,6 +708,10 @@ class ServerExecutionWrapper(object):
         self.QSUB_metadata = {"methods": methods,
                               "oneway": oneway,
                               "attrs": attrs}
+
+def QsubProxy(*args, **kwargs):
+    proxy = Pyro4.Proxy(*args, **kwargs)
+    return wrap_execution_proxy(proxy)
 
 def wrap_execution_proxy(pyro_proxy):
     pyro_proxy._pyroGetMetadata()
@@ -843,9 +852,9 @@ class QsubCommandline(object):
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
-        daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT, host=self.data['ip'])
+        daemon = QsubDaemon(port=QSUB_MANAGER_PORT, host=self.data['ip'])
         self.logger.debug("Init Manager")
-        manager = QsubManager(logger=self.logger)
+        manager = ServerExecutionWrapper(QsubManager(logger=self.logger))
         daemon.register(manager, "qsub.manager")
         self.logger.info("putting manager in request loop")
         self.stdout('blocking', datetime.datetime.now().isoformat())
