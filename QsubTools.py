@@ -296,7 +296,8 @@ class QsubManager(object):
         self.running = True
         self.latest_sub_id = -1
         self.qsubs = defaultdict(dict)
-        self.logger.info("Manager stated")
+        self.ip = self.get_ip()
+        self.logger.info("Manager started on {0}".format(self.ip))
 
     def available_modules(self):
         return self._available_modules
@@ -384,8 +385,19 @@ class QsubManager(object):
 
     def get_available_modules(self):
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
-        lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
-                           p.communicate()[1], re.DOTALL)[0]
+        (o, e) = p.communicate()
+        if o:
+            lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
+                               o[1], re.DOTALL)
+        else:
+            lines = list()
+
+        if lines:
+            lines = lines[0]
+        else:
+            self.logger.error('module avail command failed: {0}'.format(e))
+            return dict()
+
         self.logger.debug(lines)
         modules = re.split('[ \t\n]+', lines)[:-1]
         module_ver_list = [m.strip('(default)').split('/') for m in modules]
@@ -672,8 +684,8 @@ class QsubDaemon(Pyro4.Daemon):
     def __init__(self, *args, **kwargs):
         super(QsubDaemon, self).__init__(*args, **kwargs)
 
-        def get_metadata(daemon_obj, objectId):
-            obj = daemon_obj.daemon.objectsById.get(objectId)
+        def get_metadata(objectId):
+            obj = self.objectsById.get(objectId)
             if obj is not None:
                 if hasattr(obj, 'QSUB_metadata'):
                     return getattr(obj, 'QSUB_metadata')
