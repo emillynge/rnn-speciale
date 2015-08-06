@@ -4,8 +4,8 @@ from QsubTools import InvalidUserInput
 class CUDA_tests(object):
     def __init__(self):
         self.test_classes = {'math': load_source('cumath', 'pycuda-git/test/test_cumath.py').TestMath,
-                             'driver': load_source('cumath', 'pycuda-git/test/test_driver.py').TestDriver,
-                             'gpuarray': load_source('cumath', 'pycuda-git/test/test_gpuarray.py').TestGPUArray}
+                             'driver': load_source('driver', 'pycuda-git/test/test_driver.py').TestDriver,
+                             'gpuarray': load_source('gpuarray', 'pycuda-git/test/test_gpuarray.py').TestGPUArray}
 
     def test_class(self, case):
         if case not in self.test_classes:
