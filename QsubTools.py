@@ -580,16 +580,17 @@ class BaseQsubInstance(object):
                   'cls': self.qsub_generator.cls.class_name,
                   'module': self.qsub_generator.cls.module,
                   'sub_id': self.sub_id}
-        exe = "python QsubTools.py start executor manager_ip={manager_id} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
+        exe = "python QsubTools.py start executor manager_ip={manager_ip} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
         script = self.submission_script.generate(exe, self.logfile)
         self.qsub_manager.stage_submission(self.sub_id, script)
 
     def __enter__(self):
         state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
         while state != 'ready':
-            self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
-            sleep(min([t, 30]))
-            state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
+            if t > 0:
+                self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
+                sleep(min([t, 30]))
+            state, t = self.qsub_manager.qstate(self.sub_id, self.args, self.kwargs)
 
         self.proxy_info = self.qsub_manager.get_proxy_info(self.sub_id)
         self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
@@ -789,7 +790,7 @@ class QsubCommandline(object):
                                                                                       self.args.module),
                               exc_info=True)
             sleep(.5)
-            self.stdout('error', e.message)
+            self.stdout('error', e.__class__ + ': ' + e.message)
 
     def post_execute(self):
         pass
