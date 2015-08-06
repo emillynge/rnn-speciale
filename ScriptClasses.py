@@ -3,9 +3,9 @@ from imp import load_source
 from QsubTools import InvalidUserInput
 class CUDA_tests(object):
     def __init__(self):
-        self.test_classes = {'math': load_source('cumath', '/pycuda-git/test_cumath.py').TestMath,
-                             'driver': load_source('cumath', '/pycuda-git/test_driver.py').TestDriver,
-                             'gpuarray': load_source('cumath', '/pycuda-git/test_driver.py').TestGPUArray}
+        self.test_classes = {'math': load_source('cumath', 'pycuda-git/test_cumath.py').TestMath,
+                             'driver': load_source('cumath', 'pycuda-git/test_driver.py').TestDriver,
+                             'gpuarray': load_source('cumath', 'pycuda-git/test_driver.py').TestGPUArray}
 
     def test_class(self, case):
         if case not in self.test_classes:
