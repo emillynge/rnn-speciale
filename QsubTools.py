@@ -299,6 +299,10 @@ class QsubManager(object):
         self.ip = self.get_ip()
         self.logger.info("Manager started on {0}".format(self.ip))
 
+    def read_file(self, file):
+        with open(file, 'r') as fp:
+            return fp.read()
+
     def available_modules(self):
         return self._available_modules
 
@@ -599,11 +603,15 @@ class BaseQsubInstance(object):
 
     def __enter__(self):
         state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
-        while state not in ['ready', 'complete']:
+        while state not in ['ready', 'completed']:
             if t > 0:
                 self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
                 sleep(min([t, 30]))
             state, t = self.qsub_manager.qstat(self.sub_id)
+
+        if state not in ['ready']:
+            raise Exception("""job is in state: {0}\n\tcannot make connection
+            Error log:\n{1}""".format(state, self.qsub_manager.read_file(self.logfile + '.e')))
 
         self.proxy_info = self.qsub_manager.get_proxy_info(self.sub_id)
         self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
