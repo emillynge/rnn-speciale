@@ -615,32 +615,38 @@ class BaseQsubInstance(object):
 
     def __enter__(self):
         state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
-        while state not in ['ready', 'completed']:
-            if t > 0:
-                self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
-                sleep(min([t, 30]))
-            state, t = self.qsub_manager.qstat(self.sub_id)
+        try:
+            while state not in ['ready', 'completed']:
+                #raise KeyboardInterrupt()
+                if t > 0:
+                    self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
+                    sleep(min([t, 30]))
+                state, t = self.qsub_manager.qstat(self.sub_id)
 
-        if state not in ['ready']:
-            raise Exception("""job is in state: {0}\n\tcannot make connection
-            Error log:\n{1}""".format(state, self.qsub_manager.read_file(self.logfile + '.e')))
+            if state not in ['ready']:
+                raise Exception("""job is in state: {0}\n\tcannot make connection
+                Error log:\n{1}""".format(state, self.qsub_manager.read_file(self.logfile + '.e')))
 
-        self.proxy_info = self.qsub_manager.get_proxy_info(self.sub_id)
-        self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
-                                                                      server_host=self.proxy_info['ip'])
+            self.proxy_info = self.qsub_manager.get_proxy_info(self.sub_id)
+            self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
+                                                                          server_host=self.proxy_info['ip'])
 
-        self.remote_controller = Pyro4.Proxy('PYRO:qsub.execution.controller@localhost:{1}'.format(self.proxy_info['name'],
-                                                                             self.object_client_port))
-        self.remote_obj = QsubProxy('PYRO:{0}@localhost:{1}'.format(self.proxy_info['name'],
-                                                                             self.object_client_port))
-        return self.remote_obj
+            self.remote_controller = Pyro4.Proxy('PYRO:qsub.execution.controller@localhost:{1}'.format(self.proxy_info['name'],
+                                                                                 self.object_client_port))
+            self.remote_obj = QsubProxy('PYRO:{0}@localhost:{1}'.format(self.proxy_info['name'],
+                                                                                 self.object_client_port))
+            return self.remote_obj
+        except Exception as e:
+            self.close()
+            raise e
 
     def close(self):
+        self.qsub_manager.qdel(self.sub_id)
         if self.remote_controller:
             self.remote_controller.shutdown()
         if self.object_ssh_server:
             self.object_ssh_server.stop()
-        self.qsub_manager.qdel(self.sub_id)
+
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
@@ -827,7 +833,8 @@ class QsubCommandline(object):
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
                                         'isup': self.isup_manager},
-                            'executor': {'start': self.start_executor}}
+                            'executor': {'start': self.start_executor,
+                                         'stop': self.stop_executor}}
         self.commands = commands
         self.data = dict()
         self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, format_str='%(message)s')
@@ -908,26 +915,32 @@ class QsubCommandline(object):
         self.stdout_logger.debug("{0}: {1}\n\r".format(tag, json.dumps(obj)))
 
     def get_manager(self):
-        return Pyro4.Proxy("PYRO:qsub.manager@{0}:{1}".format(self.data['ip'], QSUB_MANAGER_PORT))
+        return QsubProxy("PYRO:qsub.manager@{0}:{1}".format(self.data['ip'], QSUB_MANAGER_PORT))
 
     def execute_return(self, result):
         self.stdout('return', result)
 
-    def start_executor(self):
-        error_message = ""
-        if 'manager_ip' not in self.data['kwargs']:
-            error_message += '\n\tmanager_ip is missing.'
-        if 'module' not in self.data['kwargs']:
-            error_message += '\n\tmodule is missing.'
-        if 'cls' not in self.data['kwargs']:
-            error_message += '\n\tcls is missing.'
-        if 'sub_id' not in self.data['kwargs']:
-            error_message += '\n\tsub_id is missing.'
+    def stop_executor(self):
+        manager = self.get_manager()
+        manager.qdel(self.get_kwargs('sub_id'))
 
+    def get_kwargs(self, *kwargs_fields):
+        kwargs = namedtuple('kwargs', kwargs_fields)
+        values = list()
+        error_message = ""
+        for kwarg_field in kwargs_fields:
+            if kwarg_field not in self.data['kwargs']:
+                error_message += '\n\t{0} is missing.'.format(kwarg_field)
+            else:
+                values.append(self.data['kwargs'][kwarg_field])
         if error_message:
-            raise self.CommandLineException('start executor command requires key-word arguments.' + error_message)
-        init_server_execution(self.data['kwargs']['module'], self.data['kwargs']['cls'], self.data['kwargs']['sub_id'],
-                              self.data['kwargs']['manager_ip'], self.data['ip'], logger=self.logger)
+            raise self.CommandLineException('{0} {1} command requires key-word arguments.{2}'.format(self.args.action,
+                                                                                                     self.args.module,
+                                                                                                     error_message))
+        return kwargs(*tuple(values))
+
+    def start_executor(self):
+        init_server_execution(*self.get_kwargs('module', 'cls', 'sub_id', 'manager_ip', 'ip'), logger=self.logger)
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
