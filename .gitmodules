@@ -12,3 +12,4 @@
 [submodule "pycuda"]
 	path = pycuda-git
 	url = http://git.tiker.net/trees/pycuda.git
+	branch = master
