@@ -670,7 +670,7 @@ def init_server_execution(module, cls, sub_id, manager_ip, local_ip, logger=None
 
 class QsubDaemon(Pyro4.Daemon):
     def __init__(self, *args, **kwargs):
-        super(QsubDaemon, self).__init__(self, *args, **kwargs)
+        super(QsubDaemon, self).__init__(*args, **kwargs)
 
         def get_metadata(daemon_obj, objectId):
             obj = daemon_obj.daemon.objectsById.get(objectId)
