@@ -21,7 +21,7 @@ FNULL = open('/dev/null', 'w')
 from argparse import ArgumentParser
 import re
 import Pyro4.socketutil
-from Pyro4 import errors as pyro_errors
+from Pyro4 import errors as pyro_errors, Daemon
 import logging
 from boltons import tbutils
 import traceback
@@ -150,6 +150,21 @@ def open_ssh_session_to_server():
         raise pxssh.ExceptionPxssh('Login failed')
     return s
 
+def make_path(path, ignore_last=False):
+    paths = path.split('/')
+    if ignore_last:
+        paths = paths[:-1]
+
+    abs_path = paths[0]
+    exists = True
+    for p in paths[1:] + ['']:
+        if not exists or not os.path.exists(abs_path):
+            os.mkdir(abs_path)
+            exists = False
+        abs_path += '/' + p
+        if not p:
+            break
+
 
 def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG',
                   format_str=None):
@@ -168,6 +183,7 @@ def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_strea
             log_to_file = [log_to_file] if log_to_file else list()
 
         for logfile in log_to_file:
+            make_path(logfile, ignore_last=True)
             # create file handler which logs even debug messages
             fh = logging.FileHandler(logfile)
             fh.setLevel(log_level)
@@ -229,21 +245,23 @@ class QsubClient(object):
 
         self.manager_ssh_server, self.manager_client_port = make_tunnel(5000, server_host=self.manager_ip)
         self.manager = self.get_manager()
-        self.manager.is_alive()
+        if not self.manager.is_alive():
+            self.logger.error('could not start manager')
+            raise Exception("Could not start manager")
         self.logger.debug("Successfully connected to Qsub manager on  {1}:{0}".format(self.manager_client_port,
                                                                                       self.manager_ip))
 
         if restart_manager and hot_start:
             self.restart_manager()
 
-    def generator(self, cls, wallclock, resources, rel_dir="", additional_modules=None):
+    def instance_generator(self, cls, wallclock, resources, rel_dir="", additional_modules=None):
         if not isinstance(cls, tuple):
             InvalidUserInput.compare('cls', "<type 'type'>", str(cls.__class__),
                                      message="Input should be uninstantiated class")
             cls = ClassInfo(module=cls.__module__, class_name=cls.__name__)
 
-        qsub_gen = QsubGenerator(self.manager, cls, wallclock, resources, rel_dir, additional_modules)
-        return qsub_gen.get_instance_class()
+        qsub_gen = QsubGenerator(self, cls, wallclock, resources, rel_dir, additional_modules)
+        return qsub_gen
 
     def start_manager(self):
         self.manager_ip = RemoteQsubCommandline('-i start manager').get('ip')
@@ -294,7 +312,7 @@ class QsubManager(object):
             fp.write(script)
         self.qsubs[sub_id]['state'] = 'staged'
 
-    def submit(self, sub_id, *args, **kwargs):
+    def submit(self, sub_id, args, kwargs):
         self.qsubs[sub_id]['args'] = args
         self.qsubs[sub_id]['kwargs'] = kwargs
         p_sub = Popen(['qsub', self.subid2sh(sub_id)], stdout=PIPE, stderr=PIPE)
@@ -306,6 +324,16 @@ class QsubManager(object):
     def request_execution_args(self, sub_id):
         self.qsubs[sub_id]['state'] = 'init'
         return self.qsubs[sub_id]['args'], self.qsubs[sub_id]['kwargs']
+
+    def set_proxy_info(self, sub_id, daemon_ip, daemon_port, proxy_name):
+        self.qsubs[sub_id]['proxy_info'] = {'ip': daemon_ip, 'port': daemon_port, 'name': proxy_name}
+        self.qsubs[sub_id]['state'] = 'ready'
+
+    def get_proxy_info(self, sub_id):
+        if self.qsubs[sub_id]['state'] == 'ready':
+            return self.qsubs[sub_id]['proxy_info']
+        else:
+            return None
 
     def qstat(self, sub_id):
         p_stat = Popen(['qstat', self.qsubs[sub_id]['job_id']], stdout=PIPE)
@@ -330,7 +358,7 @@ class QsubManager(object):
             return 'queued', time_sec
 
         if state['S'] == 'R':
-            if self.qsubs[sub_id]['state'] not in ['running', 'init']:
+            if self.qsubs[sub_id]['state'] not in ['running', 'init', 'ready']:
                 self.qsubs[sub_id]['state'] = 'running'
             return self.qsubs[sub_id]['state'], time_str2time_sec(state['Time Use'])
 
@@ -354,12 +382,11 @@ class QsubManager(object):
     def out_log(self, sub_id):
         return self.logfile(sub_id) + '.o'
 
-    @staticmethod
-    def get_available_modules():
+    def get_available_modules(self):
         p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
         lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
                            p.communicate()[1], re.DOTALL)[0]
-        logger.debug(lines)
+        self.logger.debug(lines)
         modules = re.split('[ \t\n]+', lines)[:-1]
         module_ver_list = [m.strip('(default)').split('/') for m in modules]
 
@@ -388,11 +415,15 @@ class QsubManager(object):
 
 
 class QsubGenerator(object):
-    def __init__(self, qsub_manager, cls, wallclock, resources, rel_dir, additional_modules):
+    def __init__(self, qsub_client, cls, wallclock, resources, rel_dir, additional_modules):
+
         assert isinstance(wallclock, HPC_Time)
         assert isinstance(resources, HPC_resources)
+        assert isinstance(qsub_client, QsubClient)
+        qsub_manager = qsub_client.manager
         assert isinstance(qsub_manager, (QsubManager, Pyro4.Proxy))
 
+        self.qsub_client = qsub_client
         self.available_modules = qsub_manager.available_modules()
         self.resources = None
         self.wc_time = None
@@ -400,7 +431,6 @@ class QsubGenerator(object):
         self.base_dir = WORKDIR
         self.rel_dir = rel_dir
         self.cls = cls
-        self.manager_ip = qsub_manager.get_ip()
         self.resources = resources
         self.wc_time = wallclock
         self.logger = create_logger('Generator')
@@ -451,6 +481,7 @@ class QsubGenerator(object):
     def get_instance_class(self):
         manager = self.manager
         ss = self.submission_script
+        qsub_client = self.qsub_client
 
         class QsubInstance(BaseQsubInstance):
             @staticmethod
@@ -464,6 +495,10 @@ class QsubGenerator(object):
             @staticmethod
             def set_qsub_generator():
                 return self
+
+            @staticmethod
+            def set_qsub_client():
+                return qsub_client
 
         return QsubInstance
 
@@ -533,13 +568,46 @@ class BaseQsubInstance(object):
         self.submission_script = self.set_submission_script()
         self.qsub_generator = self.set_qsub_generator()
         (self.sub_id, self.logfile) = self.qsub_manager.request_submission()
+        self.remote_controller = None
+        self.remote_obj = None
+        self.object_ssh_server = None
+        self.object_client_port = None
+        self.proxy_info = None
 
     def stage_submission(self):
-        exe = """python -c "from {0} import {1}; from QsubTools import QsubExecutor;
-        QsubExecutor({1}, {2}, '{3}')" """.format(
-            self.qsub_generator.package, self.qsub_generator.module, self.sub_id, self.qsub_manager.get_ip())
+        kwargs = {'manager_ip': self.qsub_client.manager_ip,
+                  'cls': self.qsub_generator.cls.class_name,
+                  'module': self.qsub_generator.cls.module,
+                  'sub_id': self.sub_id}
+        exe = "python QsubTools.py start executor manager_ip={manager_id} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
         script = self.submission_script.generate(exe, self.logfile)
         self.qsub_manager.stage_submission(self.sub_id, script)
+
+    def __enter__(self):
+        state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
+        while state != 'ready':
+            self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
+            sleep(min([t, 30]))
+            state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
+
+        self.proxy_info = self.qsub_manager.get_proxy_info(self.sub_id)
+        self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
+                                                                      server_host=self.proxy_info['ip'])
+
+        self.remote_controller = Pyro4.Proxy('PYRO:qsub.execution.controller@localhost:{1}'.format(self.proxy_info['name'],
+                                                                             self.object_client_port))
+        self.remote_obj = Pyro4.Proxy('PYRO:{0}@localhost:{1}'.format(self.proxy_info['name'],
+                                                                             self.object_client_port))
+        return self.remote_obj
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.remote_controller:
+            self.remote_controller.shutdown()
+        if self.object_ssh_server:
+            self.object_ssh_server.stop()
+
+    def __del__(self):
+        self.__exit__(1, 2, 3)
 
     @staticmethod
     def set_qsub_client():
@@ -558,20 +626,57 @@ class BaseQsubInstance(object):
         return QsubGenerator(qsub_manager=None, package=None, module=None, wallclock=HPC_Time(),
                              resources=HPC_resources(), rel_dir="", additional_modules={})
 
+class ExecutionController(object):
+    def __init__(self, logger):
+        self.running = True
+        self.logger = logger
 
-class ServerExecutionWrapper2(object):
-    def __init__(self, module, cls, sub_id, manager_ip, local_ip, logger=None):
-        self.logger = logger if logger else create_logger(logger_name="Executor", log_to_file=[])
-
-        self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000".format(manager_ip))
-        if self.manager.is_alive():
-            print "manager found!"
+    def is_alive(self):
+        if self.running:
+            self.logger.debug('alive')
+            return True
         else:
-            raise Exception('no manager found')
+            self.logger.debug('dead')
+            return False
 
-        args, kwargs = self.manager.request_execution_args(sub_id)
-        self.obj = import_obj_from(module, cls)(*args, **kwargs)
+    def shutdown(self):
+        self.logger.info("shutdown signal received")
+        self.running = False
 
+
+def init_server_execution(module, cls, sub_id, manager_ip, local_ip, logger=None):
+    logger = logger if logger else create_logger(logger_name="Executor", log_to_file=[])
+
+    manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000".format(manager_ip))
+    if manager.is_alive():
+        logger.info("manager found!")
+    else:
+        logger.error('no manager found')
+        raise Exception('no manager found')
+
+    args, kwargs = manager.request_execution_args(sub_id)
+    obj = import_obj_from(module, cls)(*args, **kwargs)
+    wrapped_object = ServerExecutionWrapper(obj)
+    daemon = Daemon(host=local_ip)
+    port = daemon.locationStr.split(':')[-1]
+    proxy_name = 'qsub.execution.{0}'.format(sub_id)
+    daemon.register(wrapped_object, proxy_name)
+    controller = ExecutionController(logger)
+    daemon.register(controller, 'qsub.execution.controller')
+    manager.set_proxy_info(sub_id, local_ip, port, proxy_name)
+
+    def get_metadata(daemon_obj, objectId):
+        obj = daemon_obj.daemon.objectsById.get(objectId)
+        if obj is not None:
+            if hasattr(obj, 'QSUB_metadata'):
+                return getattr(obj, 'QSUB_metadata')
+            return Pyro4.util.get_exposed_members(obj, only_exposed=Pyro4.config.REQUIRE_EXPOSE)
+        else:
+            Pyro4.core.log.debug("unknown object requested: %s", objectId)
+            raise Pyro4.errors.DaemonError("unknown object")
+
+    setattr(daemon.objectsById['Pyro.Daemon'], 'get_metadata', get_metadata)
+    daemon.requestLoop(controller.is_alive)
 
 class ServerExecutionWrapper(object):
     def __init__(self, obj):
@@ -586,7 +691,6 @@ class ServerExecutionWrapper(object):
 
         # exposing properties of wrapped object
         for (prop_name, prop) in obj.__dict__.items():
-            #attrs.add(prop_name)
             setattr(self, 'QSUB_fget_' + prop_name, partial(getattr, obj, prop_name))
             methods.add('QSUB_fget_' + prop_name)
             setattr(self, 'QSUB_fset_' + prop_name, partial(setattr, obj, prop_name))
@@ -597,7 +701,6 @@ class ServerExecutionWrapper(object):
         self.QSUB_metadata = {"methods": methods,
                               "oneway": oneway,
                               "attrs": attrs}
-
 
 def wrap_execution_proxy(pyro_proxy):
     pyro_proxy._pyroGetMetadata()
@@ -619,10 +722,6 @@ def wrap_execution_proxy(pyro_proxy):
     class ClientExecutionWrapper(object):
         def __init__(self, _props):
             self._props = _props
-        #
-        # def __manipulate_remote_property(self, action, prop_name, *args):
-        #     return self.__props[prop_name][action](*args)
-
 
     for m_name, m in methods.items():
         setattr(ClientExecutionWrapper, m_name, m)
@@ -737,9 +836,8 @@ class QsubCommandline(object):
 
         if error_message:
             raise self.CommandLineException('start executor command requires key-word arguments.' + error_message)
-        ServerExecutionWrapper(self.data['kwargs']['module'], self.data['kwargs']['cls'],
-                               self.data['kwargs']['sub_id'], self.data['kwargs']['manager_ip'],
-                               self.data['ip'], logger=self.logger)
+        init_server_execution(self.data['kwargs']['module'], self.data['kwargs']['cls'], self.data['kwargs']['sub_id'],
+                              self.data['kwargs']['manager_ip'], self.data['ip'], logger=self.logger)
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
