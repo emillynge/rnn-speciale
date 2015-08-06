@@ -649,6 +649,7 @@ class BaseQsubInstance(object):
             self.remote_controller.shutdown()
         if self.object_ssh_server:
             self.object_ssh_server.stop()
+        RemoteQsubCommandline('stop executor sub_id={0}'.format(self.sub_id))
 
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -926,7 +927,7 @@ class QsubCommandline(object):
 
     def stop_executor(self):
         manager = self.get_manager()
-        manager.qdel(self.get_kwargs('sub_id'))
+        self.execute_return(manager.qdel(self.get_kwargs('sub_id')))
 
     def get_kwargs(self, *kwargs_fields):
         kwargs = namedtuple('kwargs', kwargs_fields)
