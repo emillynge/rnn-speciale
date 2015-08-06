@@ -790,7 +790,7 @@ class QsubCommandline(object):
                                                                                       self.args.module),
                               exc_info=True)
             sleep(.5)
-            self.stdout('error', e.__class__ + ': ' + e.message)
+            self.stdout('error', str(e.__class__) + ': ' + e.message)
 
     def post_execute(self):
         pass
