@@ -691,7 +691,7 @@ def init_server_execution(module, cls, sub_id, manager_ip, local_ip, logger=None
 
     args, kwargs = manager.request_execution_args(sub_id)
     obj = import_obj_from(module, cls)(*args, **kwargs)
-    wrapped_object = ServerExecutionWrapper(obj)
+    wrapped_object = ServerExecutionWrapper(obj, logger=logger)
     daemon = QsubDaemon(host=local_ip)
     port = daemon.locationStr.split(':')[-1]
     proxy_name = 'qsub.execution.{0}'.format(sub_id)
