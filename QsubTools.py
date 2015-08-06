@@ -304,10 +304,15 @@ class QsubManager(object):
             return fp.read()
 
     def qdel(self, sub_id):
-        if sub_id in self.qsubs and 'job_id' in self.qsubs[sub_id]:
-            p = Popen(['qdel', self.qsubs[sub_id]['job_id']], stderr=PIPE, stdout=PIPE)
-            self.logger.debug('Removing job {0} from queue: {1}'.format(sub_id, p.communicate()))
-            return 0
+        self.logger.debug('Trying to remove submit {0}'.format(sub_id))
+        if sub_id in self.qsubs:
+            if 'job_id' in self.qsubs[sub_id]:
+                p = Popen(['qdel', self.qsubs[sub_id]['job_id']], stderr=PIPE, stdout=PIPE)
+                self.logger.debug('Removing job {0} from queue: {1}'.format(sub_id, p.communicate()))
+                return 0
+            self.logger.debug('job_id not in qsub')
+            return 1
+        self.logger.debug('sub_id not in qsubs')
         return 1
 
     def available_modules(self):
