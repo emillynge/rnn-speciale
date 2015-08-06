@@ -627,15 +627,18 @@ class BaseQsubInstance(object):
 
         self.remote_controller = Pyro4.Proxy('PYRO:qsub.execution.controller@localhost:{1}'.format(self.proxy_info['name'],
                                                                              self.object_client_port))
-        self.remote_obj = Pyro4.Proxy('PYRO:{0}@localhost:{1}'.format(self.proxy_info['name'],
+        self.remote_obj = QsubProxy('PYRO:{0}@localhost:{1}'.format(self.proxy_info['name'],
                                                                              self.object_client_port))
         return self.remote_obj
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def close(self):
         if self.remote_controller:
             self.remote_controller.shutdown()
         if self.object_ssh_server:
             self.object_ssh_server.stop()
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
 
     def __del__(self):
         self.__exit__(1, 2, 3)
@@ -716,7 +719,8 @@ class QsubDaemon(Pyro4.Daemon):
 
 
 class ServerExecutionWrapper(object):
-    def __init__(self, obj):
+    def __init__(self, obj, logger=None):
+        self.logger = logger or DummyLogger()
         methods = set()
         attrs = set()
         oneway = set()
@@ -738,6 +742,16 @@ class ServerExecutionWrapper(object):
         self.QSUB_metadata = {"methods": methods,
                               "oneway": oneway,
                               "attrs": attrs}
+
+    def __getattribute__(self, item):
+        def call(*args, **kwargs):
+            try:
+                super(ServerExecutionWrapper, self).__getattribute__(item).__call__(*args, **kwargs)
+            except Exception as e:
+                self.logger.error('Exception during function call', exc_info=True)
+                raise e
+        return call
+
 
 def QsubProxy(*args, **kwargs):
     proxy = Pyro4.Proxy(*args, **kwargs)

@@ -1,2 +1,4 @@
 sshtunnel
 Pyro4
+boltons
+pytest
