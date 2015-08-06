@@ -752,7 +752,7 @@ class ServerExecutionWrapper(object):
         if item in super(ServerExecutionWrapper, self).__getattribute__('QSUB_metadata')['methods']:
             def call(*args, **kwargs):
                 try:
-                    super(ServerExecutionWrapper, self).__getattribute__(item).__call__(*args, **kwargs)
+                    return super(ServerExecutionWrapper, self).__getattribute__(item).__call__(*args, **kwargs)
                 except Exception as e:
                     self.logger.error('Exception during function call', exc_info=True)
                     raise e
