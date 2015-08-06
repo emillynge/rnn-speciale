@@ -604,7 +604,7 @@ class BaseQsubInstance(object):
                   'cls': self.qsub_generator.cls.class_name,
                   'module': self.qsub_generator.cls.module,
                   'sub_id': self.sub_id}
-        exe = "python QsubTools.py -f {0}.log start executor ".format(self.logfile)
+        exe = "python QsubTools.py -f {0}.log -L DEBUG start executor ".format(self.logfile)
         exe += "manager_ip={manager_ip} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
         script = self.submission_script.generate(exe, self.logfile)
         self.qsub_manager.stage_submission(self.sub_id, script)
@@ -676,6 +676,7 @@ class ExecutionController(object):
 
 
 def init_server_execution(module, cls, sub_id, manager_ip, local_ip, logger=None):
+    sub_id = int(sub_id)
     logger = logger if logger else create_logger(logger_name="Executor", log_to_file=[])
 
     manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000".format(manager_ip))
