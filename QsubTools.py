@@ -158,7 +158,7 @@ def make_path(path, ignore_last=False):
     abs_path = paths[0]
     exists = True
     for p in paths[1:] + ['']:
-        if not exists or not os.path.exists(abs_path):
+        if abs_path and (not exists or not os.path.exists(abs_path)):
             os.mkdir(abs_path)
             exists = False
         abs_path += '/' + p
@@ -844,7 +844,7 @@ class QsubCommandline(object):
             kwargs['log_to_file'] = list()
         else:
             if self.args.logfiles:
-                kwargs['log_to_file'] = self.args.logfiles
+                kwargs['log_to_file'] = self.args.logfiles[0]
         kwargs["logger_name"] = 'CLI/{0} {1}'.format(self.args.action, self.args.module)
         if self.args.log_level:
             kwargs['log_level'] = self.args.log_level
