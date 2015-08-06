@@ -400,6 +400,7 @@ class QsubManager(object):
 
         self.logger.debug(lines)
         modules = re.split('[ \t\n]+', lines)[:-1]
+        self.logger.debug(modules)
         module_ver_list = [m.strip('(default)').split('/') for m in modules]
 
         module_dict = defaultdict(list)
@@ -433,7 +434,6 @@ class QsubGenerator(object):
         assert isinstance(resources, HPC_resources)
         assert isinstance(qsub_client, QsubClient)
         qsub_manager = qsub_client.manager
-        assert isinstance(qsub_manager, (QsubManager, Pyro4.Proxy))
 
         self.qsub_client = qsub_client
         self.available_modules = qsub_manager.available_modules()
