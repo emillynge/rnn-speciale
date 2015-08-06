@@ -384,11 +384,11 @@ class QsubManager(object):
         return self.logfile(sub_id) + '.o'
 
     def get_available_modules(self):
-        p = Popen("module avail", stdout=FNULL, stderr=PIPE, shell=True)
+        p = Popen("./module avail", stdout=PIPE, stderr=PIPE, shell=True)
         (o, e) = p.communicate()
-        if o:
+        if e:
             lines = re.findall('/apps/dcc/etc/Modules/modulefiles\W+(.+)',
-                               o[1], re.DOTALL)
+                               e, re.DOTALL)
         else:
             lines = list()
 
@@ -398,9 +398,7 @@ class QsubManager(object):
             self.logger.error('module avail command failed: {0}'.format(e))
             return dict()
 
-        self.logger.debug(lines)
         modules = re.split('[ \t\n]+', lines)[:-1]
-        self.logger.debug(modules)
         module_ver_list = [m.strip('(default)').split('/') for m in modules]
 
         module_dict = defaultdict(list)
