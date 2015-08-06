@@ -264,7 +264,7 @@ class QsubClient(object):
         return qsub_gen
 
     def start_manager(self):
-        self.manager_ip = RemoteQsubCommandline('-i start manager').get('ip')
+        self.manager_ip = RemoteQsubCommandline('-i start manager').get('ip')[0]
         # timeout = retries * 2
         # RemoteQsubCommandline('init manager')
         # sleep(timeout)
@@ -640,6 +640,7 @@ class BaseQsubInstance(object):
             self.remote_controller.shutdown()
         if self.object_ssh_server:
             self.object_ssh_server.stop()
+        self.qsub_manager.qdel(self.sub_id)
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
@@ -932,7 +933,7 @@ class QsubCommandline(object):
         self.logger.debug("Initializing manager")
         daemon = QsubDaemon(port=QSUB_MANAGER_PORT, host=self.data['ip'])
         self.logger.debug("Init Manager")
-        manager = ServerExecutionWrapper(QsubManager(logger=self.logger))
+        manager = ServerExecutionWrapper(QsubManager(logger=self.logger), logger=self.logger)
         daemon.register(manager, "qsub.manager")
         self.logger.info("putting manager in request loop")
         self.stdout('blocking', datetime.datetime.now().isoformat())
