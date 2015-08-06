@@ -310,7 +310,12 @@ class QsubManager(object):
         self.latest_sub_id += 1
         self.qsubs[self.latest_sub_id]['state'] = 'requested'
         self.logger.info("Submission id: {0} granted".format(self.latest_sub_id))
+        self.clean_qsub(self.latest_sub_id)
         return self.latest_sub_id, self.logfile(self.latest_sub_id)
+
+    def clean_qsub(self, sub_id):
+        Popen(['rm', '-f', self.logfile(sub_id) + '.*'])
+        Popen(['rm', '-f', self.subid2sh(sub_id)])
 
     def stage_submission(self, sub_id, script):
         with open(self.subid2sh(sub_id), 'w') as fp:
