@@ -363,9 +363,11 @@ class QsubManager(object):
                 self.qsubs[sub_id]['state'] = 'running'
             return self.qsubs[sub_id]['state'], time_str2time_sec(state['Time Use'])
 
-        elif state['S'] == 'C':
+        if state['S'] == 'C':
             self.qsubs[sub_id]['state'] = 'completed'
             return 'completed', time_str2time_sec(state['Time Use'])
+
+        return None, -1
 
     def subid2sh(self, sub_id):
         return 'qsubs/{0}.sh'.format(sub_id)
@@ -534,7 +536,7 @@ class SubmissionScript(object):
         if isinstance(execute_commands, list):
             script += '\n'.join(execute_commands)
         else:
-            script += execute_commands
+            script += execute_commands + '\n'
         return script
 
     @staticmethod
@@ -590,17 +592,18 @@ class BaseQsubInstance(object):
                   'cls': self.qsub_generator.cls.class_name,
                   'module': self.qsub_generator.cls.module,
                   'sub_id': self.sub_id}
-        exe = "python QsubTools.py start executor manager_ip={manager_ip} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
+        exe = "python QsubTools.py -f {0}.log start executor ".format(self.logfile)
+        exe += "manager_ip={manager_ip} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
         script = self.submission_script.generate(exe, self.logfile)
         self.qsub_manager.stage_submission(self.sub_id, script)
 
     def __enter__(self):
         state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
-        while state != 'ready':
+        while state not in ['ready', 'complete']:
             if t > 0:
                 self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
                 sleep(min([t, 30]))
-            state, t = self.qsub_manager.qstate(self.sub_id, self.args, self.kwargs)
+            state, t = self.qsub_manager.qstat(self.sub_id)
 
         self.proxy_info = self.qsub_manager.get_proxy_info(self.sub_id)
         self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
