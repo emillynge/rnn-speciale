@@ -932,7 +932,7 @@ class QsubCommandline(object):
 
     def stop_executor(self):
         manager = self.get_manager()
-        self.execute_return(manager.qdel(self.get_kwargs('sub_id')))
+        self.execute_return(manager.qdel(*self.get_kwargs('sub_id')))
 
     def get_kwargs(self, *kwargs_fields):
         int_casts = ['sub_id', 'port']
