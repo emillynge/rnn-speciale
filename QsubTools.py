@@ -314,7 +314,8 @@ class QsubManager(object):
         return self.latest_sub_id, self.logfile(self.latest_sub_id)
 
     def clean_qsub(self, sub_id):
-        Popen(['rm', '-f', self.logfile(sub_id) + '.*'])
+        p = Popen(['rm', '-f', self.logfile(sub_id) + '.*'], stdout=PIPE, stderr=PIPE)
+        self.logger.debug('removing logfiles:\n\t{0}'.format(p.communicate()))
         Popen(['rm', '-f', self.subid2sh(sub_id)])
 
     def stage_submission(self, sub_id, script):
