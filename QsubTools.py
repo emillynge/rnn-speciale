@@ -5,7 +5,7 @@ __author__ = 'emil'
 USER = "s082768@student.dtu.dk"
 WORKDIR = "/zhome/25/2/51526/Speciale/rnn-speciale"
 SITE_PACKAGE_DIR = "/zhome/25/2/51526/.local/lib/python2.7/site-packages"
-LOGDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/qsub/logs"
+LOGDIR = "/zhome/25/2/51526/Speciale/rnn-speciale/qsubs/logs"
 SERVER_PYTHON_BIN = "/usr/local/gbar/apps/python/2.7.1/bin/python"
 SERVER_MODULE_BIN = "/apps/dcc/bin/module"
 QSUB_MANAGER_PORT = 5000
@@ -30,14 +30,16 @@ import json
 from copy import copy
 from time import sleep
 from importlib import import_module
-
+from functools import partial
 Pyro4.config.COMMTIMEOUT = 5.0  # without this daemon.close() hangs
 
 from collections import namedtuple, defaultdict
 
 
 class InvalidUserInput(Exception):
-    def __init__(self, argname, expected, found, message, equal=True, indent=3, **kwargs):
+    def __init__(self, message, argnames=[], expected='', found='', should='', indent=3, **kwargs):
+        if isinstance(argnames, str):
+            argnames = [argnames]
         calling_frame = sys._getframe(indent)
         method_frame = sys._getframe(indent - 1)
 
@@ -47,14 +49,14 @@ class InvalidUserInput(Exception):
 
         self.data = {'expected': expected,
                      'found': found,
-                     'argname': argname,
+                     'argnames': argnames,
                      'method_name': method_name,
                      'pre_message': tb_str[34:] if tb_str else "",
                      'message': message,
                      'declaration': declaration,
                      'input_args': input_args,
-                     'arg_no': input_args.index(argname),
-                     'should': 'to be' if equal else 'not to be'}
+                     'arg_no': [input_args.index(argname) + 1 for argname in argnames if argname in input_args],
+                     'should': should}
 
         super(InvalidUserInput, self).__init__(self.message, **kwargs)
 
@@ -67,8 +69,6 @@ class InvalidUserInput(Exception):
             declaration_buffer = fp.readline()
             while '):' not in declaration_buffer:
                 declaration_buffer += fp.readline()
-
-            print declaration_buffer
             input_str = re.findall('def\W+{0}\((.+)\):'.format(frame.f_code.co_name),
                                    declaration_buffer, re.DOTALL)[0]
             declaration_str = re.findall('def\W+({0}\(.+?\)):'.format(frame.f_code.co_name), declaration_buffer)[0]
@@ -81,18 +81,26 @@ class InvalidUserInput(Exception):
 
     @property
     def message(self):
-        return """Invalid input to {declaration}{pre_message}\t{method_name} requires argument {arg_no} "{argname}" {should} "{expected}", but got "{found}"
-        {message}""".format(**self.data)
+        message = "Invalid input to {declaration}{pre_message}\t".format(**self.data)
+        if self.data['argnames']:
+            message += 'argument {arg_no} "{argnames}"'.format(**self.data)
+
+        if self.data['found']:
+            message += ' was "{found}"'.format(**self.data)
+
+        if self.data['expected']:
+            message += ' but {method_name} requires {should} "{expected}"'.format(**self.data)
+
+        if self.data['message']:
+            message += '\n\t' + self.data['message']
+        return message
 
     @staticmethod
     def compare(argname, expect, found, message="", equal=True):
-        if equal:
-            assert_true = expect == found
-        else:
-            assert_true = expect != found
-
-        if not assert_true:
-            raise InvalidUserInput(argname, expect, found, message, equal=equal)
+        if equal and expect != found:
+            raise InvalidUserInput(message, argname, expect, found, should='it to be')
+        elif not equal and expect == found:
+            raise InvalidUserInput(message, argname, expect, found, should='it not to be')
 
     @staticmethod
     def parse_input_str(input_str):
@@ -120,9 +128,13 @@ class InvalidUserInput(Exception):
 
             curr_arg += char
         input_args.append(curr_arg)
-        return [a.strip(' ') for a in input_args]
+        input_args = [a.strip(' ') for a in input_args]
+        if 'self' in input_args:
+            input_args.remove('self')
+        return input_args
 
-class InvalidQsubArguments(Exception):
+
+class InvalidQsubArguments(InvalidUserInput):
     pass
 
 
@@ -232,7 +244,7 @@ class QsubClient(object):
         if not isinstance(cls, tuple):
             InvalidUserInput.compare('cls', "<type 'type'>", str(cls.__class__),
                                      message="Input should be uninstantiated class")
-            cls = ClassInfo(module=cls.__module__, name=cls.__name__)
+            cls = ClassInfo(module=cls.__module__, class_name=cls.__name__)
 
         qsub_gen = QsubGenerator(self.manager, cls, wallclock, resources, rel_dir, additional_modules)
         return qsub_gen.get_instance_class()
@@ -282,9 +294,56 @@ class QsubManager(object):
         return self.latest_sub_id, self.logfile(self.latest_sub_id)
 
     def stage_submission(self, sub_id, script):
-        with open('qsubs/{0}.sh'.format(sub_id), 'w') as fp:
+        with open(self.subid2sh(sub_id), 'w') as fp:
             fp.write(script)
         self.qsubs[sub_id]['state'] = 'staged'
+
+    def submit(self, sub_id, *args, **kwargs):
+        self.qsubs[sub_id]['args'] = args
+        self.qsubs[sub_id]['kwargs'] = kwargs
+        p_sub = Popen(['qsub', self.subid2sh(sub_id)], stdout=PIPE, stderr=PIPE)
+        stdout = p_sub.stdout.read()
+        job_id = re.findall('(\d+)\.\w+', stdout)[0]
+        self.qsubs[sub_id]['job_id'] = job_id
+        return self.qstat(sub_id)
+
+    def request_execution_args(self, sub_id):
+        self.qsubs[sub_id]['state'] = 'init'
+        return self.qsubs[sub_id]['args'], self.qsubs[sub_id]['kwargs']
+
+    def qstat(self, sub_id):
+        p_stat = Popen(['qstat', self.qsubs[sub_id]['job_id']], stdout=PIPE)
+        vals = re.split('[ ]+', re.findall(self.qsubs[sub_id]['job_id'] + '.+', p_stat.stdout.read())[0])
+        keys = ['Job ID', 'Name', 'User', 'Time Use', 'S', 'Queue']
+        state = dict(zip(keys, vals[:-1]))
+
+        def time_str2time_sec(time_str):
+            time_tup = re.findall('(\d+):(\d+):(\d+)', time_str)
+            if time_tup:
+                return int(time_tup[0][0]) * 60 * 60 + int(time_tup[0][1]) * 60 + int(time_tup[0][0])
+            return -1
+
+        if state['S'] == 'Q':
+            self.qsubs[sub_id]['state'] = 'queued'
+            p_start = Popen(['showstart',  self.qsubs[sub_id]['job_id']], stdout=PIPE)
+            time_str = re.findall('Estimated Rsv based start in\W+(\d+:\d+:\d+)', p_start.stdout.read())
+            if time_str:
+                time_sec = time_str2time_sec(time_str[0])
+            else:
+                time_sec = -1
+            return 'queued', time_sec
+
+        if state['S'] == 'R':
+            if self.qsubs[sub_id]['state'] not in ['running', 'init']:
+                self.qsubs[sub_id]['state'] = 'running'
+            return self.qsubs[sub_id]['state'], time_str2time_sec(state['Time Use'])
+
+        elif state['S'] == 'C':
+            self.qsubs[sub_id]['state'] = 'completed'
+            return 'completed', time_str2time_sec(state['Time Use'])
+
+    def subid2sh(self, sub_id):
+        return 'qsubs/{0}.sh'.format(sub_id)
 
     def get_state(self, sub_id):
         return self.qsubs[sub_id]['state']
@@ -353,10 +412,12 @@ class QsubGenerator(object):
 
         try:
             if resources.nodes < 1 or resources.ppn < 1:
-                raise InvalidQsubArguments('A job must have at least 1 node and 1 processor')
+                raise InvalidQsubArguments('A job must have at least 1 node and 1 processor', argnames='resources',
+                                           found=resources)
 
             if not any(wallclock):
-                raise InvalidQsubArguments('No wall clock time assigned to job: {0}:{1}:{2}'.format(wallclock))
+                raise InvalidQsubArguments('No wall clock time assigned to job', argnames='wallclock', found=wallclock,
+                                           )
 
             if not self.manager.path_exists(self.work_dir):
                 raise InvalidQsubArguments("Work directory {0} doesn't exist.".format(self.work_dir))
@@ -418,10 +479,9 @@ class SubmissionScript(object):
         self.modules = modules
 
     def generate(self, execute_commands, log_file):
-        script = '\n'.join(self.lines) + '\n'
-        script += self.make_pbs_pragma('e', log_file + ".e") + '\n'
+        script = self.make_pbs_pragma('e', log_file + ".e") + '\n'
         script += self.make_pbs_pragma('o', log_file + ".o") + '\n'
-
+        script += '\n'.join(self.lines) + '\n'
         for module_name, version in self.modules.iteritems():
             script += 'module load ' + module_name
             if version:
@@ -503,29 +563,94 @@ class BaseQsubInstance(object):
                              resources=HPC_resources(), rel_dir="", additional_modules={})
 
 
-class QsubExecutor(object):
-    def __init__(self, cls, sub_id, manager_ip):
+class ServerExecutionWrapper2(object):
+    def __init__(self, module, cls, sub_id, manager_ip, local_ip, logger=logger):
+        self.logger = logger if logger else create_logger(logger_name="Executor", log_to_file=[])
+
         self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000".format(manager_ip))
         if self.manager.is_alive():
             print "manager found!"
-        print cls
-        print sub_id
+        else:
+            raise Exception('no manager found')
+
+        args, kwargs = self.manager.request_execution_args(sub_id)
+        self.obj = import_obj_from(module, cls)(*args, **kwargs)
+
+
+class ServerExecutionWrapper(object):
+    def __init__(self, obj):
+        methods = set()
+        attrs = set()
+        oneway = set()
+        # exposing methods of wrapped object
+        for method_name in obj.__class__.__dict__.keys():
+            if method_name[0] != '_':
+                setattr(self, method_name, getattr(obj, method_name))
+                methods.add(method_name)
+
+        # exposing properties of wrapped object
+        for (prop_name, prop) in obj.__dict__.items():
+            #attrs.add(prop_name)
+            setattr(self, 'QSUB_fget_' + prop_name, partial(getattr, obj, prop_name))
+            methods.add('QSUB_fget_' + prop_name)
+            setattr(self, 'QSUB_fset_' + prop_name, partial(setattr, obj, prop_name))
+            methods.add('QSUB_fset_' + prop_name)
+            setattr(self, 'QSUB_fdel_' + prop_name, partial(delattr, obj, prop_name))
+            methods.add('QSUB_fdel_' + prop_name)
+
+        self.QSUB_metadata = {"methods": methods,
+                              "oneway": oneway,
+                              "attrs": attrs}
+
+
+def wrap_execution_proxy(pyro_proxy):
+    pyro_proxy._pyroGetMetadata()
+    props = defaultdict(dict)
+    in_props = defaultdict(dict)
+    methods = dict()
+
+    def manipulate_prop(action, propname, self, *args):
+        return self._props[action][propname].__call__(*args)
+
+    for method_name in pyro_proxy._pyroMethods:
+        regexp = re.findall('^QSUB_((fget)|(fset)|(fdel))_(.+$)', method_name)
+        if regexp:
+            props[regexp[0][-1]][regexp[0][0]] = pyro_proxy.__getattr__(method_name)
+            in_props[regexp[0][-1]][regexp[0][0]] = partial(manipulate_prop, regexp[0][-1], regexp[0][0])
+        else:
+            methods[method_name] = pyro_proxy.__getattr__(method_name)
+
+    class ClientExecutionWrapper(object):
+        def __init__(self, _props):
+            self._props = _props
+        #
+        # def __manipulate_remote_property(self, action, prop_name, *args):
+        #     return self.__props[prop_name][action](*args)
+
+
+    for m_name, m in methods.items():
+        setattr(ClientExecutionWrapper, m_name, m)
+
+    for (prop_name, methods) in in_props.iteritems():
+            setattr(ClientExecutionWrapper, prop_name, property(**methods))
+
+    return ClientExecutionWrapper(props)
 
 
 class QsubCommandline(object):
-    def __init__(self):
+    def __init__(self, commands=None):
         self.args2method = {'manager': {'start': self.start_manager,
                                         'stop': self.stop_manager,
-                                        'isup': self.isup_manager}}
+                                        'isup': self.isup_manager},
+                            'executor': {'start': self.start_executor}}
+        self.commands = commands
+        self.data = dict()
         self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, format_str='%(message)s')
         self.args = self.parse_args()
         if self.args.remote:
             self.data = RemoteQsubCommandline(' '.join([arg for arg in sys.argv[1:] if arg not in ['-r', '--remote']]))
         else:
             self.logger = self.create_logger()
-
-            self.data = dict()
-
             self.pre_execute()
             self.execute()
             self.post_execute()
@@ -533,11 +658,27 @@ class QsubCommandline(object):
     def get(self, *args):
         return tuple(self.data[key] for key in args)
 
-    def parse_args(self, *args):
-        return self.get_argument_parser().parse_args()
+    def parse_args(self):
+        if self.commands is not None:
+            args = self.get_argument_parser().parse_args(self.commands.split())
+        else:
+            args = self.get_argument_parser().parse_args()
+
+        self.data['kwargs'] = dict()
+        if args.kwargs:
+            for kwarg in args.kwargs:
+                if '=' not in kwarg:
+                    raise self.CommandLineException('Invalid input "{0}": key-word arguments must contain a "="'.format(kwarg))
+                self.data['kwargs'].update(dict([tuple(kwarg.split('='))]))
+        return args
 
     def get_exec_func(self):
-        return self.args2method[self.args.module][self.args.action]
+        if self.args.module in self.args2method and self.args.action in self.args2method[self.args.module]:
+            return self.args2method[self.args.module][self.args.action]
+        return self.method_not_implemented_func
+
+    def method_not_implemented_func(self):
+        self.stdout("error", "action {0} not implemented for module {1}".format(self.args.action, self.args.module))
 
     def pre_execute(self):
         self.data['ip'] = self.get_ip()
@@ -586,6 +727,23 @@ class QsubCommandline(object):
 
     def execute_return(self, result):
         self.stdout('return', result)
+
+    def start_executor(self):
+        error_message = ""
+        if 'manager_ip' not in self.data['kwargs']:
+            error_message += '\n\tmanager_ip is missing.'
+        if 'module' not in self.data['kwargs']:
+            error_message += '\n\tmodule is missing.'
+        if 'cls' not in self.data['kwargs']:
+            error_message += '\n\tcls is missing.'
+        if 'sub_id' not in self.data['kwargs']:
+            error_message += '\n\tsub_id is missing.'
+
+        if error_message:
+            raise self.CommandLineException('start executor command requires key-word arguments.' + error_message)
+        ServerExecutionWrapper(self.data['kwargs']['module'], self.data['kwargs']['cls'],
+                               self.data['kwargs']['sub_id'], self.data['kwargs']['manager_ip'],
+                               self.data['ip'], logger=self.logger)
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
@@ -655,8 +813,13 @@ class QsubCommandline(object):
                             help="action to send to module")
 
         parser.add_argument('module',
-                            choices=['manager'],
+                            choices=['manager', 'executor'],
                             help="module to send action to")
+
+        parser.add_argument('kwargs',
+                            help="arguments to send to module",
+                            nargs='*',
+                            metavar='key=value')
         return parser
 
     @staticmethod
@@ -666,13 +829,9 @@ class QsubCommandline(object):
 
 class RemoteQsubCommandline(QsubCommandline):
     def __init__(self, commands):
-        self.command = commands
         self.ssh = self.setup_ssh_instance()
         self.ssh.ignore_sighup = False
-        super(RemoteQsubCommandline, self).__init__()
-
-    def parse_args(self):
-        return self.get_argument_parser().parse_args(self.command.split())
+        super(RemoteQsubCommandline, self).__init__(commands=commands)
 
     def create_logger(self):
         return DummyLogger()
@@ -692,14 +851,14 @@ class RemoteQsubCommandline(QsubCommandline):
             full_command += 'nohup '
 
         full_command += "python QsubTools.py "
-        full_command += self.command
+        full_command += self.commands
 
         if blocking:
             full_command += ' > nohup.out & tail -f nohup.out'
-        self.command = full_command
+        self.commands = full_command
 
     def execute(self):
-        self.ssh.sendline(self.command)
+        self.ssh.sendline(self.commands)
 
     def ssh_expect(self, pattern):
         patterns = ['error:', pattern]
