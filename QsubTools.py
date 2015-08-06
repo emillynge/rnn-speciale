@@ -339,7 +339,7 @@ class QsubManager(object):
         return self.qsubs[sub_id]['args'], self.qsubs[sub_id]['kwargs']
 
     def set_proxy_info(self, sub_id, daemon_ip, daemon_port, proxy_name):
-        self.qsubs[sub_id]['proxy_info'] = {'ip': daemon_ip, 'port': daemon_port, 'name': proxy_name}
+        self.qsubs[sub_id]['proxy_info'] = {'ip': daemon_ip, 'port': int(daemon_port), 'name': proxy_name}
         self.qsubs[sub_id]['state'] = 'ready'
 
     def get_proxy_info(self, sub_id):
