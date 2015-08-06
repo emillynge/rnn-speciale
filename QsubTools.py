@@ -290,8 +290,8 @@ class QsubClient(object):
 
 
 class QsubManager(object):
-    def __init__(self):
-        self.logger = create_logger('Manager')
+    def __init__(self, logger=None):
+        self.logger = logger or create_logger('Manager')
         self._available_modules = self.get_available_modules()
         self.running = True
         self.latest_sub_id = -1
@@ -573,6 +573,7 @@ class BaseQsubInstance(object):
         self.object_ssh_server = None
         self.object_client_port = None
         self.proxy_info = None
+        self.stage_submission()
 
     def stage_submission(self):
         kwargs = {'manager_ip': self.qsub_client.manager_ip,
@@ -843,7 +844,7 @@ class QsubCommandline(object):
         self.logger.debug("Initializing manager")
         daemon = Pyro4.Daemon(port=QSUB_MANAGER_PORT, host=self.data['ip'])
         self.logger.debug("Init Manager")
-        manager = QsubManager()
+        manager = QsubManager(logger=self.logger)
         daemon.register(manager, "qsub.manager")
         self.logger.info("putting manager in request loop")
         self.stdout('blocking', datetime.datetime.now().isoformat())
