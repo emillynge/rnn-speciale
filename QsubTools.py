@@ -183,10 +183,6 @@ def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_strea
 
     return _logger
 
-
-logger = create_logger()
-
-
 class DummyLogger(object):
     def debug(self, *args, **kwargs):
         pass
@@ -564,7 +560,7 @@ class BaseQsubInstance(object):
 
 
 class ServerExecutionWrapper2(object):
-    def __init__(self, module, cls, sub_id, manager_ip, local_ip, logger=logger):
+    def __init__(self, module, cls, sub_id, manager_ip, local_ip, logger=None):
         self.logger = logger if logger else create_logger(logger_name="Executor", log_to_file=[])
 
         self.manager = Pyro4.Proxy("PYRO:qsub.manager@{0}:5000".format(manager_ip))
