@@ -305,7 +305,10 @@ class QsubManager(object):
 
     def qdel(self, sub_id):
         if sub_id in self.qsubs and 'job_id' in self.qsubs[sub_id]:
-            Popen(['qdel', self.qsubs[sub_id]['job_id']])
+            p = Popen(['qdel', self.qsubs[sub_id]['job_id']], stderr=PIPE, stdout=PIPE)
+            self.logger.debug('Removing job {0} from queue: {1}'.format(sub_id, p.communicate()))
+            return 0
+        return 1
 
     def available_modules(self):
         return self._available_modules
@@ -836,11 +839,12 @@ class QsubCommandline(object):
                             'executor': {'start': self.start_executor,
                                          'stop': self.stop_executor}}
         self.commands = commands
+        self.argv = commands.split(' ') if commands else sys.argv[1:]
         self.data = dict()
         self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, format_str='%(message)s')
         self.args = self.parse_args()
         if self.args.remote:
-            self.data = RemoteQsubCommandline(' '.join([arg for arg in sys.argv[1:] if arg not in ['-r', '--remote']]))
+            self.data = RemoteQsubCommandline(' '.join([arg for arg in self.argv[1:] if arg not in ['-r', '--remote']]))
         else:
             self.logger = self.create_logger()
             self.pre_execute()
