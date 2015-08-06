@@ -930,12 +930,15 @@ class QsubCommandline(object):
         self.execute_return(manager.qdel(self.get_kwargs('sub_id')))
 
     def get_kwargs(self, *kwargs_fields):
+        int_casts = ['sub_id', 'port']
         kwargs = namedtuple('kwargs', kwargs_fields)
         values = list()
         error_message = ""
         for kwarg_field in kwargs_fields:
             if kwarg_field not in self.data['kwargs']:
                 error_message += '\n\t{0} is missing.'.format(kwarg_field)
+            elif kwarg_field in int_casts:
+                values.append(int(self.data['kwargs'][kwarg_field]))
             else:
                 values.append(self.data['kwargs'][kwarg_field])
         if error_message:
