@@ -303,6 +303,10 @@ class QsubManager(object):
         with open(file, 'r') as fp:
             return fp.read()
 
+    def qdel(self, sub_id):
+        if sub_id in self.qsubs and 'job_id' in self.qsubs[sub_id]:
+            Popen(['qdel', self.qsubs[sub_id]['job_id']])
+
     def available_modules(self):
         return self._available_modules
 
@@ -781,11 +785,38 @@ def wrap_execution_proxy(pyro_proxy):
         def __init__(self, _props):
             self._props = _props
 
+        def __getattribute__(self, item):
+            if item in methods:
+                def call(*args, **kwargs):
+                    retries = 0
+                    while retries < 5:
+                        try:
+                            return super(ClientExecutionWrapper, self).__getattribute__(item).__call__(*args, **kwargs)
+                        except pyro_errors.CommunicationError as e:
+                            pass
+                        retries += 1
+                        sleep(.1)
+                    raise e
+                return call
+
+            elif item in props:
+                retries = 0
+                while retries < 5:
+                    try:
+                        return super(ClientExecutionWrapper, self).__getattribute__(item)
+                    except pyro_errors.CommunicationError as e:
+                        pass
+                    retries += 1
+                    sleep(.1)
+                raise e
+            else:
+                return super(ClientExecutionWrapper, self).__getattribute__(item)
+
     for m_name, m in methods.items():
         setattr(ClientExecutionWrapper, m_name, m)
 
-    for (prop_name, methods) in in_props.iteritems():
-            setattr(ClientExecutionWrapper, prop_name, property(**methods))
+    for (prop_name, _methods) in in_props.iteritems():
+            setattr(ClientExecutionWrapper, prop_name, property(**_methods))
 
     return ClientExecutionWrapper(props)
 
