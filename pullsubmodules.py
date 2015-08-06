@@ -28,6 +28,12 @@ parser.add_argument('--sub-modules',
                     help='specify which submodules to pull (default: all)',
                     dest='submodules')
 
+parser.add_argument('--init',
+                    '-i',
+                    action="store_true",
+                    help='init submodule',
+                    dest="init")
+
 parser.add_argument('--add',
                     '-a',
                     action="store_true",
@@ -129,6 +135,9 @@ def add_submodule(sm_info):
             '-b', sm_info['branch'],
             sm_info['url'], sm_info['path']])
 
+def init_submodule(sm_info):
+    p_call(['git', 'submodule', 'update', '--init', sm_info['path']])
+
 def get_libs():
     if not os.path.exists('lib'):
         os.mkdir('lib')
@@ -175,6 +184,10 @@ if __name__ == "__main__":
 
         if args.add:
             add_submodule(sm_info)
+
+        if args.init:
+            init_submodule(sm_info)
+
         pull_submodule(sm_info)
         if (sm_info.get('rebuild', False) and args.rebuild) or args.force_rebuild:
             build_module(sm_info)
