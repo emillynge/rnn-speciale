@@ -604,7 +604,7 @@ class BaseQsubInstance(object):
                   'cls': self.qsub_generator.cls.class_name,
                   'module': self.qsub_generator.cls.module,
                   'sub_id': self.sub_id}
-        exe = "python QsubTools.py -f {0}.log -L DEBUG start executor ".format(self.logfile)
+        exe = "python QsubTools.py -s -f {0}.log -L DEBUG start executor ".format(self.logfile)
         exe += "manager_ip={manager_ip} cls={cls} module={module} sub_id={sub_id}".format(**kwargs)
         script = self.submission_script.generate(exe, self.logfile)
         self.qsub_manager.stage_submission(self.sub_id, script)
@@ -744,13 +744,16 @@ class ServerExecutionWrapper(object):
                               "attrs": attrs}
 
     def __getattribute__(self, item):
-        def call(*args, **kwargs):
-            try:
-                super(ServerExecutionWrapper, self).__getattribute__(item).__call__(*args, **kwargs)
-            except Exception as e:
-                self.logger.error('Exception during function call', exc_info=True)
-                raise e
-        return call
+        if item in super(ServerExecutionWrapper, self).__getattribute__('QSUB_metadata')['methods']:
+            def call(*args, **kwargs):
+                try:
+                    super(ServerExecutionWrapper, self).__getattribute__(item).__call__(*args, **kwargs)
+                except Exception as e:
+                    self.logger.error('Exception during function call', exc_info=True)
+                    raise e
+            return call
+        else:
+            return super(ServerExecutionWrapper, self).__getattribute__(item)
 
 
 def QsubProxy(*args, **kwargs):
