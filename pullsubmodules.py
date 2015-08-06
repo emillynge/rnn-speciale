@@ -28,6 +28,12 @@ parser.add_argument('--sub-modules',
                     help='specify which submodules to pull (default: all)',
                     dest='submodules')
 
+parser.add_argument('--add',
+                    '-a',
+                    action="store_true",
+                    help='add (clone) submodule',
+                    dest="add")
+
 parser.add_argument('--rebuild',
                     '-b',
                     action="store_true",
@@ -118,6 +124,10 @@ def pull_submodule(submodule_dict):
     finally:
         os.chdir('../')
 
+def add_submodule(sm_info):
+    p_call(['git', 'submodule', 'add', '--name', sm_info['name'],
+            '-b', sm_info['branch'],
+            sm_info['url'], sm_info['path']])
 
 def get_libs():
     if not os.path.exists('lib'):
@@ -162,6 +172,9 @@ if __name__ == "__main__":
 
     for sm in pull_submodules:
         sm_info = known_submodules[sm]
+
+        if args.add:
+            add_submodule(sm_info)
         pull_submodule(sm_info)
         if (sm_info.get('rebuild', False) and args.rebuild) or args.force_rebuild:
             build_module(sm_info)
