@@ -649,12 +649,21 @@ class BaseQsubInstance(object):
             raise e
 
     def close(self):
-        self.qsub_manager.qdel(self.sub_id)
+        Popen(['python2', 'QsubTools.py', '-r', 'stop', 'executor', 'sub_id={0}'.format(self.sub_id)])
+        try:
+            self.qsub_manager.qdel(self.sub_id)
+        except Exception as e:
+            pass
         if self.remote_controller:
-            self.remote_controller.shutdown()
+            try:
+                self.remote_controller.shutdown()
+            except Exception as e:
+                pass
         if self.object_ssh_server:
-            self.object_ssh_server.stop()
-        RemoteQsubCommandline('stop executor sub_id={0}'.format(self.sub_id))
+            try:
+                self.object_ssh_server.stop()
+            except Exception as e:
+                pass
 
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -698,7 +707,9 @@ class ExecutionController(object):
         self.running = False
 
 
-def init_server_execution(module, cls, sub_id, manager_ip, local_ip, logger=None):
+def init_server_execution(module, cls, sub_id, manager_ip, local_ip=None, logger=None):
+    if not local_ip:
+        local_ip = QsubManager.get_ip()
     sub_id = int(sub_id)
     logger = logger if logger else create_logger(logger_name="Executor", log_to_file=[])
 
@@ -953,7 +964,8 @@ class QsubCommandline(object):
         return kwargs(*tuple(values))
 
     def start_executor(self):
-        init_server_execution(*self.get_kwargs('module', 'cls', 'sub_id', 'manager_ip', 'ip'), logger=self.logger)
+        init_server_execution(*self.get_kwargs('module', 'cls', 'sub_id', 'manager_ip'), local_ip=self.data['ip'],
+        logger=self.logger)
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
