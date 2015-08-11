@@ -185,7 +185,7 @@ def create_logger(logger_name="Qsub", log_to_file=None, log_to_stream=True, log_
     formatter = logging.Formatter(format_str)
 
     if log_to_file is None:
-        log_to_file = 'logs/qsubs.log'
+        log_to_file = ['logs/qsubs.log']
     elif not isinstance(log_to_file, (list, tuple)):
         log_to_file = [log_to_file] if log_to_file else list()
 
