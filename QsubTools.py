@@ -21,7 +21,9 @@ FNULL = open('/dev/null', 'w')
 from argparse import ArgumentParser
 import re
 import Pyro4.socketutil
-from Pyro4 import errors as pyro_errors, Daemon
+from Pyro4 import errors as pyro_errors
+from Pyro4 import util as pyro_util
+
 import logging
 from boltons import tbutils
 import traceback
@@ -31,15 +33,18 @@ from copy import copy
 from time import sleep
 from importlib import import_module
 from functools import partial
+
 Pyro4.config.COMMTIMEOUT = 5.0  # without this daemon.close() hangs
 
 from collections import namedtuple, defaultdict
 
 
+# noinspection PyProtectedMember
 class InvalidUserInput(Exception):
-    def __init__(self, message, argnames=[], expected='', found='', should='', indent=3, **kwargs):
-        if isinstance(argnames, str):
-            argnames = [argnames]
+    def __init__(self, message, argname="", argnames=tuple(), expected=None, found=None, should=None, indent=3,
+                 **kwargs):
+        if argname:
+            argnames = (argname,)
         calling_frame = sys._getframe(indent)
         method_frame = sys._getframe(indent - 1)
 
@@ -63,7 +68,7 @@ class InvalidUserInput(Exception):
     def get_declaration(self, frame):
         lno = frame.f_code.co_firstlineno
         with open(frame.f_code.co_filename) as fp:
-            for k in range(lno-1):
+            for k in range(lno - 1):
                 fp.readline()
 
             declaration_buffer = fp.readline()
@@ -115,7 +120,7 @@ class InvalidUserInput(Exception):
             if char in ')]}':
                 quotes[char] -= 1
                 if quotes[char] == 0:
-                    del(quotes[char])
+                    del (quotes[char])
                 continue
 
             if char in '\n\r\t':
@@ -150,6 +155,7 @@ def open_ssh_session_to_server():
         raise pxssh.ExceptionPxssh('Login failed')
     return s
 
+
 def make_path(path, ignore_last=False):
     paths = path.split('/')
     if ignore_last:
@@ -166,7 +172,7 @@ def make_path(path, ignore_last=False):
             break
 
 
-def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_stream=True, log_level='DEBUG',
+def create_logger(logger_name="Qsub", log_to_file=None, log_to_stream=True, log_level='DEBUG',
                   format_str=None):
     if not log_to_file and not log_to_stream:  # neither stream nor logfile specified. no logger wanted.
         return DummyLogger()
@@ -178,10 +184,12 @@ def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_strea
         format_str = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     formatter = logging.Formatter(format_str)
 
-    if log_to_file:
-        if not isinstance(log_to_file, list):
-            log_to_file = [log_to_file] if log_to_file else list()
+    if log_to_file is None:
+        log_to_file = 'logs/qsubs.log'
+    elif not isinstance(log_to_file, (list, tuple)):
+        log_to_file = [log_to_file] if log_to_file else list()
 
+    if log_to_file:
         for logfile in log_to_file:
             make_path(logfile, ignore_last=True)
             # create file handler which logs even debug messages
@@ -198,6 +206,7 @@ def create_logger(logger_name="Qsub", log_to_file='logs/qsubs.log', log_to_strea
         _logger.addHandler(ch)
 
     return _logger
+
 
 class DummyLogger(object):
     def debug(self, *args, **kwargs):
@@ -299,8 +308,8 @@ class QsubManager(object):
         self.ip = self.get_ip()
         self.logger.info("Manager started on {0}".format(self.ip))
 
-    def read_file(self, file):
-        with open(file, 'r') as fp:
+    def read_file(self, file_name):
+        with open(file_name, 'r') as fp:
             return fp.read()
 
     def qdel(self, sub_id):
@@ -366,15 +375,15 @@ class QsubManager(object):
         keys = ['Job ID', 'Name', 'User', 'Time Use', 'S', 'Queue']
         state = dict(zip(keys, vals[:-1]))
 
-        def time_str2time_sec(time_str):
-            time_tup = re.findall('(\d+):(\d+):(\d+)', time_str)
+        def time_str2time_sec(t_str):
+            time_tup = re.findall('(\d+):(\d+):(\d+)', t_str)
             if time_tup:
                 return int(time_tup[0][0]) * 60 * 60 + int(time_tup[0][1]) * 60 + int(time_tup[0][0])
             return -1
 
         if state['S'] == 'Q':
             self.qsubs[sub_id]['state'] = 'queued'
-            p_start = Popen(['showstart',  self.qsubs[sub_id]['job_id']], stdout=PIPE)
+            p_start = Popen(['showstart', self.qsubs[sub_id]['job_id']], stdout=PIPE)
             time_str = re.findall('Estimated Rsv based start in\W+(\d+:\d+:\d+)', p_start.stdout.read())
             if time_str:
                 time_sec = time_str2time_sec(time_str[0])
@@ -393,7 +402,8 @@ class QsubManager(object):
 
         return None, -1
 
-    def subid2sh(self, sub_id):
+    @staticmethod
+    def subid2sh(sub_id):
         return 'qsubs/{0}.sh'.format(sub_id)
 
     def get_state(self, sub_id):
@@ -474,11 +484,11 @@ class QsubGenerator(object):
 
         try:
             if resources.nodes < 1 or resources.ppn < 1:
-                raise InvalidQsubArguments('A job must have at least 1 node and 1 processor', argnames='resources',
+                raise InvalidQsubArguments('A job must have at least 1 node and 1 processor', argname='resources',
                                            found=resources)
 
             if not any(wallclock):
-                raise InvalidQsubArguments('No wall clock time assigned to job', argnames='wallclock', found=wallclock,
+                raise InvalidQsubArguments('No wall clock time assigned to job', argname='wallclock', found=wallclock,
                                            )
 
             if not self.manager.path_exists(self.work_dir):
@@ -495,7 +505,9 @@ class QsubGenerator(object):
 
     def make_submission_script(self):
         ss = SubmissionScript(self.work_dir, self.modules)
+        # noinspection PyTypeChecker
         ss.resources(self.resources)
+        # noinspection PyTypeChecker
         ss.wallclock(self.wc_time)
         ss.name('.'.join(self.cls))
         ss.mail(SSH_USERNAME + '@student.dtu.dk')
@@ -625,9 +637,10 @@ class BaseQsubInstance(object):
         state, t = self.qsub_manager.submit(self.sub_id, self.args, self.kwargs)
         try:
             while state not in ['ready', 'completed']:
-                #raise KeyboardInterrupt()
+                # raise KeyboardInterrupt()
                 if t > 0:
-                    self.qsub_client.logger.debug('Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
+                    self.qsub_client.logger.debug(
+                        'Waiting for remote object.\n\t State: {0}\n\t Seconds left: {1}'.format(state, t))
                     sleep(min([t, 30]))
                 state, t = self.qsub_manager.qstat(self.sub_id)
 
@@ -639,33 +652,35 @@ class BaseQsubInstance(object):
             self.object_ssh_server, self.object_client_port = make_tunnel(self.proxy_info['port'],
                                                                           server_host=self.proxy_info['ip'])
 
-            self.remote_controller = Pyro4.Proxy('PYRO:qsub.execution.controller@localhost:{1}'.format(self.proxy_info['name'],
-                                                                                 self.object_client_port))
+            self.remote_controller = Pyro4.Proxy(
+                'PYRO:qsub.execution.controller@localhost:{1}'.format(self.proxy_info['name'],
+                                                                      self.object_client_port))
             self.remote_obj = QsubProxy('PYRO:{0}@localhost:{1}'.format(self.proxy_info['name'],
-                                                                                 self.object_client_port))
+                                                                        self.object_client_port))
             return self.remote_obj
         except Exception as e:
             self.close()
             raise e
 
+    # noinspection PyBroadException
     def close(self):
         Popen(['python2', 'QsubTools.py', '-r', 'stop', 'executor', 'sub_id={0}'.format(self.sub_id)])
         try:
             self.qsub_manager.qdel(self.sub_id)
-        except Exception as e:
+        except Exception:
             pass
         if self.remote_controller:
             try:
                 self.remote_controller.shutdown()
-            except Exception as e:
+            except Exception:
                 pass
         if self.object_ssh_server:
             try:
                 self.object_ssh_server.stop()
-            except Exception as e:
+            except Exception:
                 pass
 
-
+    # noinspection PyUnusedLocal
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
 
@@ -686,8 +701,10 @@ class BaseQsubInstance(object):
 
     @staticmethod
     def set_qsub_generator():
+        # noinspection PyArgumentList,PyTypeChecker
         return QsubGenerator(qsub_manager=None, package=None, module=None, wallclock=HPC_Time(),
                              resources=HPC_resources(), rel_dir="", additional_modules={})
+
 
 class ExecutionController(object):
     def __init__(self, logger):
@@ -732,19 +749,21 @@ def init_server_execution(module, cls, sub_id, manager_ip, local_ip=None, logger
     manager.set_proxy_info(sub_id, local_ip, port, proxy_name)
     daemon.requestLoop(controller.is_alive)
 
+
 class QsubDaemon(Pyro4.Daemon):
     def __init__(self, *args, **kwargs):
         super(QsubDaemon, self).__init__(*args, **kwargs)
 
+        # noinspection PyPep8Naming
         def get_metadata(objectId):
             obj = self.objectsById.get(objectId)
             if obj is not None:
                 if hasattr(obj, 'QSUB_metadata'):
                     return getattr(obj, 'QSUB_metadata')
-                return Pyro4.util.get_exposed_members(obj, only_exposed=Pyro4.config.REQUIRE_EXPOSE)
+                return pyro_util.get_exposed_members(obj, only_exposed=Pyro4.config.REQUIRE_EXPOSE)
             else:
                 Pyro4.core.log.debug("unknown object requested: %s", objectId)
-                raise Pyro4.errors.DaemonError("unknown object")
+                raise pyro_errors.DaemonError("unknown object")
 
         setattr(self.objectsById['Pyro.Daemon'], 'get_metadata', get_metadata)
 
@@ -782,15 +801,19 @@ class ServerExecutionWrapper(object):
                 except Exception as e:
                     self.logger.error('Exception during function call', exc_info=True)
                     raise e
+
             return call
         else:
             return super(ServerExecutionWrapper, self).__getattribute__(item)
 
 
+# noinspection PyPep8Naming
 def QsubProxy(*args, **kwargs):
     proxy = Pyro4.Proxy(*args, **kwargs)
     return wrap_execution_proxy(proxy)
 
+
+# noinspection PyProtectedMember
 def wrap_execution_proxy(pyro_proxy):
     pyro_proxy._pyroGetMetadata()
     props = defaultdict(dict)
@@ -812,8 +835,10 @@ def wrap_execution_proxy(pyro_proxy):
         def __init__(self, _props):
             self._props = _props
 
+        # noinspection PyUnboundLocalVariable
         def __getattribute__(self, item):
             if item in methods:
+                # noinspection PyShadowingNames
                 def call(*args, **kwargs):
                     retries = 0
                     while retries < 5:
@@ -824,6 +849,7 @@ def wrap_execution_proxy(pyro_proxy):
                         retries += 1
                         sleep(.1)
                     raise e
+
                 return call
 
             elif item in props:
@@ -843,7 +869,7 @@ def wrap_execution_proxy(pyro_proxy):
         setattr(ClientExecutionWrapper, m_name, m)
 
     for (prop_name, _methods) in in_props.iteritems():
-            setattr(ClientExecutionWrapper, prop_name, property(**_methods))
+        setattr(ClientExecutionWrapper, prop_name, property(**_methods))
 
     return ClientExecutionWrapper(props)
 
@@ -861,7 +887,7 @@ class QsubCommandline(object):
         self.stdout_logger = create_logger('CLI/stdout', log_to_file="", log_to_stream=True, format_str='%(message)s')
         self.args = self.parse_args()
         if self.args.remote:
-            self.data = RemoteQsubCommandline(' '.join([arg for arg in self.argv[1:] if arg not in ['-r', '--remote']]))
+            RemoteQsubCommandline(' '.join([arg for arg in self.argv[1:] if arg not in ['-r', '--remote']]))
         else:
             self.logger = self.create_logger()
             self.pre_execute()
@@ -881,7 +907,8 @@ class QsubCommandline(object):
         if args.kwargs:
             for kwarg in args.kwargs:
                 if '=' not in kwarg:
-                    raise self.CommandLineException('Invalid input "{0}": key-word arguments must contain a "="'.format(kwarg))
+                    raise self.CommandLineException(
+                        'Invalid input "{0}": key-word arguments must contain a "="'.format(kwarg))
                 self.data['kwargs'].update(dict([tuple(kwarg.split('='))]))
         return args
 
@@ -965,7 +992,7 @@ class QsubCommandline(object):
 
     def start_executor(self):
         init_server_execution(*self.get_kwargs('module', 'cls', 'sub_id', 'manager_ip'), local_ip=self.data['ip'],
-        logger=self.logger)
+                              logger=self.logger)
 
     def start_manager(self):
         self.logger.debug("Initializing manager")
