@@ -300,6 +300,14 @@ class QsubClient(object):
 
 class QsubManager(object):
     def __init__(self, logger=None):
+        self._state2num = {'requested': 0,
+                          'staged': 1,
+                          'submitted': 1.5,
+                          'queued': 2,
+                          'running': 3,
+                          'init': 3.5,
+                          'ready': 4,
+                          'completed': 5}
         self.logger = logger or create_logger('Manager')
         self._available_modules = self.get_available_modules()
         self.running = True
@@ -353,6 +361,7 @@ class QsubManager(object):
         stdout = p_sub.stdout.read()
         job_id = re.findall('(\d+)\.\w+', stdout)[0]
         self.qsubs[sub_id]['job_id'] = job_id
+        self.qsubs[sub_id]['state'] = 'submitted'
         return self.qstat(sub_id)
 
     def request_execution_args(self, sub_id):
@@ -369,7 +378,19 @@ class QsubManager(object):
         else:
             return None
 
+    def state_num(self, sub_id):
+        if sub_id not in self.qsubs:
+            return -1
+        return self._state2num[self.qsubs[sub_id]['state']]
+
+    def has_reached_state(self, sub_id, state):
+        return self.state_num(sub_id) >= self._state2num[state]
+
     def qstat(self, sub_id):
+        time_sec = -1
+        if not self.has_reached_state(sub_id, 'submitted'):
+            return None, time_sec
+
         p_stat = Popen(['qstat', self.qsubs[sub_id]['job_id']], stdout=PIPE)
         vals = re.split('[ ]+', re.findall(self.qsubs[sub_id]['job_id'] + '.+', p_stat.stdout.read())[0])
         keys = ['Job ID', 'Name', 'User', 'Time Use', 'S', 'Queue']
@@ -387,20 +408,17 @@ class QsubManager(object):
             time_str = re.findall('Estimated Rsv based start in\W+(\d+:\d+:\d+)', p_start.stdout.read())
             if time_str:
                 time_sec = time_str2time_sec(time_str[0])
-            else:
-                time_sec = -1
-            return 'queued', time_sec
 
-        if state['S'] == 'R':
-            if self.qsubs[sub_id]['state'] not in ['running', 'init', 'ready']:
+        elif state['S'] == 'R':
+            if not self.has_reached_state(sub_id, 'running'):
                 self.qsubs[sub_id]['state'] = 'running'
-            return self.qsubs[sub_id]['state'], time_str2time_sec(state['Time Use'])
+            time_sec = time_str2time_sec(state['Time Use'])
 
-        if state['S'] == 'C':
+        elif state['S'] == 'C':
             self.qsubs[sub_id]['state'] = 'completed'
-            return 'completed', time_str2time_sec(state['Time Use'])
+            time_sec = time_str2time_sec(state['Time Use'])
 
-        return None, -1
+        return self.qsubs[sub_id]['state'], time_sec
 
     @staticmethod
     def subid2sh(sub_id):
@@ -556,6 +574,7 @@ class SubmissionScript(object):
         self.lines = ["#!/bin/sh"]
         self.wd = work_dir
         self.modules = modules
+        self.mod2script = {'cuda': """export CUDA_DEVICE=`cat $PBS_GPUFILE | rev | cut -d"-" -f1 | rev | tr -cd [:digit:]`"""}
 
     def generate(self, execute_commands, log_file):
         script = self.make_pbs_pragma('e', log_file + ".e") + '\n'
@@ -566,6 +585,8 @@ class SubmissionScript(object):
             if version:
                 script += '/' + version
             script += '\n'
+            if module_name in self.mod2script:
+                script += self.mod2script[module_name] + '\n'
         script += "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:{0}/lib\n".format(WORKDIR)
         script += 'cd {0}\n'.format(self.wd)
 
@@ -616,6 +637,7 @@ class BaseQsubInstance(object):
         self.submission_script = self.set_submission_script()
         self.qsub_generator = self.set_qsub_generator()
         (self.sub_id, self.logfile) = self.qsub_manager.request_submission()
+        self.qsub_client.logger.info("sub_id {0} received".format(self.sub_id))
         self.remote_controller = None
         self.remote_obj = None
         self.object_ssh_server = None
