@@ -24,7 +24,7 @@ import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 from Pyro4 import util as pyro_util
 Pyro4.config.SERIALIZER = 'pickle'
-Pyro4.config.SERIALIZERS_ACCEPTED += ',pickle'
+Pyro4.config.SERIALIZERS_ACCEPTED.add('pickle')
 
 
 import logging
