@@ -23,6 +23,9 @@ import re
 import Pyro4.socketutil
 from Pyro4 import errors as pyro_errors
 from Pyro4 import util as pyro_util
+Pyro4.config.SERIALIZER = 'pickle'
+Pyro4.config.SERIALIZERS_ACCEPTED += ',pickle'
+
 
 import logging
 from boltons import tbutils
@@ -278,11 +281,11 @@ class QsubClient(object):
 
     @property
     def interpreter(self):
-        return 'python2'
+        return 'python'
 
     @property
     def target_file(self):
-        return 'QsubTest.py'
+        return 'QsubTools.py'
 
     def make_tunnel(self):
         return make_tunnel(5000, server_host=self.manager_ip)
@@ -739,7 +742,7 @@ class BaseQsubInstance(object):
             self._get_execution_controller()
 
     def _get_execution_controller(self):
-        self.execution_controller = QsubProxy('PYRO:qsub.execution.controller@localhost:{1}'.format(self.object_client_port))
+        self.execution_controller = QsubProxy('PYRO:qsub.execution.controller@localhost:{0}'.format(self.object_client_port))
 
     def make_obj(self, obj_descriptor):
         if not all([self.qsub_manager.in_state(self.sub_id, 'ready'), self.execution_controller]):
@@ -750,7 +753,7 @@ class BaseQsubInstance(object):
             self.execution_controller.set_prototype(cls=obj_descriptor.class_name,
                                                     module=obj_descriptor.module)
             prototype_set = True
-        elif hasattr(obj_descriptor, '__class__') and "<type 'type'>" == str(obj_descriptor.__class__):
+        elif hasattr(obj_descriptor, '__name__') and hasattr(obj_descriptor, '__module__'):
             self.execution_controller.set_prototype(cls=obj_descriptor.__name__,
                                                     module=obj_descriptor.__module__)
             prototype_set = True
@@ -763,7 +766,7 @@ class BaseQsubInstance(object):
                                    found=obj_descriptor)
 
     def _get_obj(self, obj_info):
-        return QsubProxy('PYRO:{0}@localhost:{1}'.format(obj_info['object_id']), self.object_client_port)
+        return QsubProxy('PYRO:{0}@localhost:{1}'.format(obj_info['object_id'], self.object_client_port))
 
     def wait_for_state(self, target_state, iter_limit=100):
         state, t = self.qsub_manager.qstat(self.sub_id)
@@ -808,6 +811,8 @@ class BaseQsubInstance(object):
             except Exception:
                 Popen([self.qsub_client.interpreter, self.qsub_client.target_file,
                        '-r', 'stop', 'executor', 'sub_id={0}'.format(self.sub_id)])
+        if self.object_ssh_server:
+            self.object_ssh_server.stop()
 
     # noinspection PyUnusedLocal
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -1043,7 +1048,7 @@ class QsubCommandline(object):
         return tuple(self.data[key] for key in args)
 
     def remote_call(self, commands):
-        RemoteQsubCommandline(' '.join([command for command in commands if commands not in ['-r', '--remote']]))
+        RemoteQsubCommandline(' '.join([command for command in commands if command not in ['-r', '--remote']]))
 
     def parse_args(self):
         if self.commands is not None:
@@ -1297,6 +1302,9 @@ class RemoteQsubCommandline(QsubCommandline):
         s.sendline('cd {0}'.format(WORKDIR))
         s.prompt()
         return s
+
+    def __del__(self):
+        self.ssh.close()
 
 
 if __name__ == "__main__":
