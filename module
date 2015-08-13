@@ -1,5 +1,5 @@
 #!/bin/sh
-
+if [ "$1" == "avail" ]; then
 >&2 echo "---------------------------- /appl/Modules/versions ----------------------------
 3.2.8 3.3.a
 
@@ -39,3 +39,8 @@ intel.orig/tbb                   studio/12u1
 intel.orig/vtune                 studio/12u3b(default)
 intelmpi/4.1.0.024
 "
+fi
+
+if [ "$1" == "load" ] ; then
+   >&2 echo "Loaded module: $2"
+fi
