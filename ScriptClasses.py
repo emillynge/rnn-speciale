@@ -1,6 +1,9 @@
 __author__ = 'emil'
 from imp import load_source
-from QsubTools import InvalidUserInput
+
+from OldQsub.QsubTools import InvalidUserInput
+
+
 class CUDA_tests(object):
     def __init__(self):
         self.test_classes = {'math': load_source('cumath', 'pycuda-git/test/test_cumath.py').TestMath,

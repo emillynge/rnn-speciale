@@ -1,9 +1,13 @@
 __author__ = 'emil'
-from QsubTools import RemoteQsubCommandline, BaseQsubInstance, QsubClient, QsubProxy, QsubManager, QsubCommandline, QSUB_MANAGER_PORT, ServerExecutionWrapper, QsubDaemon
-from pexpect import spawn
 from subprocess import Popen, PIPE
 import re
 import datetime
+
+from pexpect import spawn
+
+from OldQsub.QsubTools import RemoteQsubCommandline, QsubClient, QsubProxy, QsubManager, QsubCommandline, QSUB_MANAGER_PORT, ServerExecutionWrapper, QsubDaemon
+
+
 class pxsshTest(spawn):
     def __init__(self, *args, **kwargs):
         super(pxsshTest, self).__init__('bash -i')

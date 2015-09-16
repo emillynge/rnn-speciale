@@ -2,3 +2,5 @@ sshtunnel
 Pyro4
 boltons
 pytest
+Mako
+https://github.com/emillynge/python-remoteexecution/tarball/master#egg=remoteexecution

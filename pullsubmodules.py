@@ -1,6 +1,5 @@
-from subprocess import call, Popen, PIPE
+from subprocess import Popen, PIPE
 from argparse import ArgumentParser
-from QsubTools import WORKDIR, SITE_PACKAGE_DIR
 import os
 import re
 
