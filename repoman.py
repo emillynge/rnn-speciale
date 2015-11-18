@@ -17,7 +17,7 @@ import os
 from subprocess import Popen, PIPE
 
 _PREBUILD = {'pycuda': {('archlaptop',): NotImplemented,
-                        ('tethys',): NotImplemented,
+                        ('tethys',): [],
                         ('n-62-12-1',): [['python', 'configure.py', '--cudadrv-lib-dir=' + os.getcwd() + '/lib',
                                           '--boost-inc-dir=/appl/boost/1.57.0/lib',
                                           '--boost-inc-dir=/appl/boost/1.57.0/include',
