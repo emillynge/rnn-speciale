@@ -6,6 +6,6 @@
 	url = https://github.com/craffel/nntools.git
 	branch = recurrent
 [submodule "pycuda"]
-	path = pycuda-git
+	path = pycuda.git
 	url = http://git.tiker.net/trees/pycuda.git
 	branch = master
