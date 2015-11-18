@@ -146,7 +146,7 @@ def do_compile(sub_modules=None, force=False):
                                             'StdErr': proc.stderr.read()}))
             if prebuild:                    # still commands left in prebuild
                 commands = prebuild.pop(0)
-                proc = Popen(commands, stdout=PIPE, stderr=PIPE)
+                proc = Popen(commands, stdout=PIPE, stderr=PIPE, cwd=subpath)
                 ppdeb(subpath, commands, label='Prebuild command')
             elif prebuild is not None:      # no commands left. run easyinstall
                 proc = Popen(['easy_install-2.7', '--user', subpath], stdout=PIPE, stderr=PIPE)
