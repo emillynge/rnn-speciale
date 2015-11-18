@@ -1,10 +1,6 @@
 [submodule "Theano"]
 	path = Theano-git
 	url = git://github.com/Theano/Theano.git
-[submodule "skaae"]
-	path = skaae-git
-	url = https://github.com/skaae/nntools
-	branch = pentree_recurrent
 [submodule "nntools"]
 	path = nntools-git
 	url = https://github.com/craffel/nntools.git
