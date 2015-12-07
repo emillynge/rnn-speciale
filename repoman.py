@@ -107,11 +107,11 @@ def do_update(sub_modules=None):
             sr.git.checkout(sub_mod.branch.name)
             if 'localcompiled' not in sr.branches:
                 sr.create_head('localcompiled', 'HEAD')
-            sub_mod.update(recursive=True, to_latest_revision=True, progress=progress, dry_run=False)
+            sub_mod.update(recursive=True, to_latest_revision=True, progress=progress, dry_run=False, force=True)
         else:
-            sub_mod.update(recursive=True, to_latest_revision=True, progress=progress, dry_run=False)
+            sub_mod.update(recursive=True, to_latest_revision=True, progress=progress, dry_run=False, force=True)
             sr = Repo(sub_mod.abspath)
-            sr.create_head('localcompiled', first_commit)
+            sr.create_head('localcompiled', first_commit(sr))
 
 
 COMPILEQUEUE = deque()
