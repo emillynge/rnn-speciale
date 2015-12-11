@@ -157,7 +157,7 @@ def do_compile(sub_modules=None, force=False):
                 proc = Popen(commands, stdout=PIPE, stderr=PIPE, cwd=subpath)
                 ppdeb(subpath, commands, label='Prebuild command')
             elif prebuild is not None:      # no commands left. run easyinstall
-                proc = Popen([pip, subpath, '--user'], stdout=PIPE, stderr=PIPE)
+                proc = Popen([pip, 'install', subpath, '--user'], stdout=PIPE, stderr=PIPE)
                 prebuild = None
                 ppdeb(subpath, label="Pip'ing")
             else:                           # easyinstall has completed. skip putting into queue and mark as compiled
