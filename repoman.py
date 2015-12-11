@@ -10,7 +10,15 @@ logging.basicConfig(level=logging.DEBUG)
 deb = logging.debug
 from argparse import ArgumentParser
 import socket
-from StringIO import StringIO
+import sys
+
+if sys.version_info.major == 3:
+    from io import StringIO
+    pip = 'pip3.5'
+else:
+    from StringIO import StringIO
+    pip = 'pip2'
+
 
 HOST = socket.gethostname()
 import os
@@ -149,7 +157,7 @@ def do_compile(sub_modules=None, force=False):
                 proc = Popen(commands, stdout=PIPE, stderr=PIPE, cwd=subpath)
                 ppdeb(subpath, commands, label='Prebuild command')
             elif prebuild is not None:      # no commands left. run easyinstall
-                proc = Popen(['pip3.5', subpath, '--user'], stdout=PIPE, stderr=PIPE)
+                proc = Popen([pip, subpath, '--user'], stdout=PIPE, stderr=PIPE)
                 prebuild = None
                 ppdeb(subpath, label="Pip'ing")
             else:                           # easyinstall has completed. skip putting into queue and mark as compiled
