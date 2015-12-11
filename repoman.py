@@ -149,9 +149,9 @@ def do_compile(sub_modules=None, force=False):
                 proc = Popen(commands, stdout=PIPE, stderr=PIPE, cwd=subpath)
                 ppdeb(subpath, commands, label='Prebuild command')
             elif prebuild is not None:      # no commands left. run easyinstall
-                proc = Popen(['easy_install-2.7', '--user', subpath], stdout=PIPE, stderr=PIPE)
+                proc = Popen(['pip3.5', subpath, '--user'], stdout=PIPE, stderr=PIPE)
                 prebuild = None
-                ppdeb(subpath, label='Easyinstalling')
+                ppdeb(subpath, label="Pip'ing")
             else:                           # easyinstall has completed. skip putting into queue and mark as compiled
                 sr = Repo(subpath)
                 for head in sr.heads:
