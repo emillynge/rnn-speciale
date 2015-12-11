@@ -32,8 +32,8 @@ _PREBUILD = {'pycuda': {('archlaptop',): NotImplemented,
                                           '--boost-compiler=gcc47',
                                           '--boost-python-libname=boost_python']]}}
 PREBUILD = defaultdict(dict)
-for submod, host_confs in _PREBUILD.iteritems():
-    for hosts, conf in host_confs.iteritems():
+for submod, host_confs in _PREBUILD.items():
+    for hosts, conf in host_confs.items():
         for host in hosts:
             PREBUILD[submod][host] = conf
 
