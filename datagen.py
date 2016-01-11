@@ -1,11 +1,13 @@
 import inspect
+import random
 from time import time
 import collections
 
 __author__ = 'emil'
-from collections import deque, UserDict, Sequence, MutableSequence
+from collections import deque, UserDict, Sequence, MutableSequence, Counter
 import codecs
 import os
+import json
 from operator import itemgetter
 from io import StringIO
 import numpy as np
@@ -20,56 +22,13 @@ from elymetaclasses import SingleDispatchMetaClass
 from multiprocessing import Queue, Process
 from threading import Thread
 from multiprocessing.queues import Empty
-from io import TextIOBase as _TextIOBase
-from io import StringIO as _StringIO
-from io import BytesIO as _BytesIO
+from io import StringIO
+import logging
+from abc import ABC, abstractclassmethod
+logging.basicConfig()
 from time import sleep
+from myabc import *
 
-
-class InputStream(metaclass=ABCMeta):
-    @abstractmethod
-    def read(self, size=-1) -> Sequence:
-        pass
-
-    @abstractmethod
-    def close(self):
-        pass
-
-    @classmethod
-    def __subclasshook__(cls, C):
-        if cls is InputStream:
-            if any("read" in B.__dict__ for B in C.__mro__):
-                return True
-            return NotImplemented
-InputStream.register(TextIOWrapper)
-
-
-class OutputStream(metaclass=ABCMeta):
-    @abstractmethod
-    def write(self, s) -> int:
-        pass
-
-    @abstractmethod
-    def close(self):
-        pass
-
-    @classmethod
-    def __subclasshook__(cls, C):
-        if cls is OutputStream:
-            if any("write" in B.__dict__ for B in C.__mro__):
-                return True
-            return NotImplemented
-OutputStream.register(TextIOWrapper)
-
-
-class IOStream(InputStream, OutputStream):
-    @classmethod
-    def __subclasshook__(cls, C):
-        if cls is IOStream:
-            if (any("read" in B.__dict__ for B in C.__mro__) and
-                    any("write" in B.__dict__ for B in C.__mro__)):
-                return True
-            return NotImplemented
 
 
 def sub_seq4stream(buffer_sz=1000, n_chunks=-1, custom_concat=None):
@@ -113,6 +72,164 @@ def sub_seq4stream(buffer_sz=1000, n_chunks=-1, custom_concat=None):
                         return
         return wrapper
     return decorator
+
+
+class LastResort:
+    pass
+
+class ResetIteration(StopIteration):
+    pass
+
+from typing import List
+# noinspection PyRedeclaration
+class BatchGeneratorBuffer(StringIO):
+    class SD(metaclass=SingleDispatchMetaClass):
+
+        @staticmethod
+        def _input2sequence(inp: LastResort):
+            logging.log('Cannot determine input type')
+            return inp
+
+        @staticmethod
+        def _input2sequence(inp: Sequence):
+            return inp
+
+        @staticmethod
+        def _input2sequence(inp: str):
+            return inp
+
+        @staticmethod
+        def _input2sequence(inp: SeekableInputStream):
+            inp.seek(0)
+            return inp.read()
+
+        @staticmethod
+        def _input2sequence(inp: InputStream):
+            return inp.read()
+
+    def __init__(self, inp, start=None, end=None):
+        start = start or 0
+        end = end or -1
+        super().__init__(self.SD._input2sequence(inp)[start:end])
+        self.l = self.seek(0, 2)
+        self.seek(0)
+        self.c = Counter()
+        self.mode = 'simple'
+        self.batch_gen_func = None
+        self.__read = self.read
+
+    def __len__(self):
+        return self.l
+
+    class DummyProgressBar(object):
+        def __init__(self, max_val=None):
+            self.value = 0
+
+        def start(self):
+            pass
+
+        def __next__(self):
+            pass
+
+        def __iter__(self):
+            return self
+
+        def __call__(self, it):
+            return it
+
+    def cast_at_read(self, castfun):
+        orig_read = super().read
+        def read(*args, **kwargs):
+            return castfun(orig_read(*args, **kwargs))
+
+        setattr(self, 'read', read)
+
+    def random_seek(self, margin_left=0, margin_right=0):
+        idx = random.randint(margin_left, self.l - margin_right)
+        self.seek(idx)
+
+    def split(self, sub_stream_propotions: Sequence) -> List[StringIO]:
+        l = self.seek(0, 2)
+        total_prop = sum(sub_stream_propotions)
+        normed_props = [0] + [prop/total_prop for prop in sub_stream_propotions]
+        fence_posts = [sum(normed_props[:i]) for i in range(1, len(normed_props) + 1)]
+        splits_idx = [int(l * fence_posts) for fence_posts in fence_posts]
+        return [self.from_self(self.getvalue(), start=i1, end=i2) for i1, i2 in zip(splits_idx[:-1], splits_idx[1:])]
+
+    @classmethod
+    def from_self(cls, *args, **kwargs):
+        return cls(*args, **kwargs)
+
+    def configure(self, batch_generator, mode='simple'):
+        self.batch_gen_func = batch_generator
+        self.mode = mode
+
+    def batches(self, opt, pbar_cls: DummyProgressBar=None):
+        #func_opts = dict((k, opt[k]) for k in inspect.signature(batch_generator).parameters.keys() if k in opt)
+        if not self.batch_gen_func:
+            raise ValueError('not configured. call .configure(batch_generator)')
+        if pbar_cls is None:
+            pbar_cls = self.DummyProgressBar
+
+        def rem_update():
+            p = pbar_cls(max_val=100)
+            def update():
+                p.value = self.c['batches'] % 100
+            return p, update
+
+        def simple_update(max_val):
+            p = pbar_cls(max_val)
+            def update():
+                p.value = self.c['batches']
+            return p, update
+
+        def new_gen():
+            gen = self.batch_gen_func(self, **opt)
+            next(gen)
+            return gen
+
+        self.c = Counter()
+        gen = new_gen()
+        if self.mode == 'random-batches':
+            n_batches = opt.get('n_batches', -1)
+            if n_batches < 0:
+                p, update = rem_update()
+            else:
+                p, update = simple_update(n_batches)
+
+            p.start()
+            while n_batches < 0 or self.c['batches'] < n_batches:
+                self.random_seek()
+                yield gen.send(ResetIteration)
+                self.c['batches'] += 1
+                update()
+
+        if self.mode == 'simple':
+            n_epochs = opt.get('n_epochs', -1)
+            if n_epochs < 0:
+                p, update = rem_update()
+            else:
+                batches_per_epoch = opt.get('batches_per_epoch', None)
+                if batches_per_epoch is None:
+                    print('Getting batches per epoch')
+                    i = 0
+                    for i, _ in enumerate(gen):
+                        pass
+                    batches_per_epoch = i
+                    print(batches_per_epoch)
+
+                    gen = new_gen()
+
+                p, update = simple_update(n_epochs * batches_per_epoch)
+
+            p.start()
+            while n_epochs < 0 or self.c['epochs'] < n_epochs:
+                while True:
+                    yield next(gen)
+                    self.c['batches'] += 1
+                gen = new_gen()
+                self.c['epochs'] += 1
+                self.seek(0)
 
 
 # noinspection PyRedeclaration
@@ -295,13 +412,13 @@ class BatchGenerator(metaclass=SingleDispatchMetaClass):
         """
         raise NotImplementedError('stream {!r} cannot be copied due to unknown type')
 
-    def copy_stream(self, stream: _BytesIO):
+    def copy_stream(self, stream: BytesIO):
         raise NotImplementedError()
 
-    def copy_stream(self, stream: _StringIO):
+    def copy_stream(self, stream: StringIO):
         raise NotImplementedError()
 
-    def copy_stream(self, stream: _TextIOBase):
+    def copy_stream(self, stream: TextIOBase):
         """
         copy a file like stream
         :param stream: file pointer
@@ -459,13 +576,48 @@ class CatchReturnFromYield:
             raise e
 
 
+class JsonSaveLoadMixin(ABC):
+    def save(self, file):
+        if isinstance(file, OutputStream):
+            file.write(self.dumps())
+        elif isinstance(file, str):
+            with open(file, 'w') as fp:
+                fp.write(self.dumps())
 
-class CharMap(UserDict):
-    max_i = 32
+    @classmethod
+    def load(cls, file):
+        if isinstance(file, InputStream):
+            return cls.from_dict(**json.load(file))
+        elif isinstance(file, str):
+            if os.path.isfile(file):
+                with open(file, 'r') as fp:
+                    return cls.from_dict(**json.load(fp))
+            else:
+                logging.warning('Input is a str but not a filename! trying to use loads...')
+                return cls.loads(file)
+
+    @classmethod
+    def loads(cls, s):
+        return cls.from_dict(**json.loads(s))
+
+    def dumps(self):
+        return json.dumps(self.to_dict())
+
+    @abstractclassmethod
+    def from_dict(cls, *args, **kwargs):
+        pass
+
+    @abstractmethod
+    def to_dict(self) -> dict:
+        pass
+
+
+class CharMap(UserDict, JsonSaveLoadMixin):
+    max_i = 100
 
     def __init__(self, *args, **kwargs):
+        self.reverse = dict()
         super().__init__(*args, **kwargs)
-        self.reverse = dict((i, c) for c, i in self.items())
         self.vectors = np.eye(self.max_i, dtype=np.bool)
         self.idx_vec = np.arange(self.max_i)
 
@@ -502,14 +654,46 @@ class CharMap(UserDict):
         if isinstance(inp, (np.int, np.int64)):
             return self.reverse[int(inp)]
 
+    def truncate(self):
+        self.resize(len(self))
 
-class SingletonCharMap:
+    @classmethod
+    def from_dict(cls, data:dict, max_i=100):
+        cls.max_i = max_i
+        return cls(data)
+
+    def to_dict(self):
+        return {'data': self.data, 'max_i': self.max_i}
+
+    def train(self, stream: InputStream):
+        chars = set(c for c in stream.read())
+        sorted_chars = sorted(chars)
+        self.resize(len(sorted_chars))
+        for i, c in enumerate(sorted_chars):
+            self[c] = i
+
+
+class SingletonCharMap(JsonSaveLoadMixin):
     curr_charmap = CharMap()
 
-    def __getattr__(self, item):
-        if item not in ['curr_charmap']:
-            return getattr(self.curr_charmap, item)
-        return super().__getattr__(item)
+    def to_dict(self) -> dict:
+        return self.curr_charmap.to_dict()
+
+    @classmethod
+    def from_dict(cls, *args, **kwargs):
+        cls.curr_charmap = cls.curr_charmap.from_dict(*args, **kwargs)
+        return cls()
+
+    @classmethod
+    def __call__(cls, inp):
+        return cls.curr_charmap.__call__(inp)
+
+    @classmethod
+    def c2arr(cls, s):
+        return cls.curr_charmap.vectors[cls.curr_charmap[s]]
+
+    def __getitem__(self, item):
+        return self.curr_charmap[item]
 
     @classmethod
     def update_from_dict(cls, char_map: UserDict):
@@ -622,6 +806,56 @@ def batch_gen(fp, win_sz, buf_sz, batch_sz):
             break
         yield x, y
 
+
+charmap = SingletonCharMap()
+
+def windowed_chars_fp(stream, win_sz, buf_sz=10000):
+    if isinstance(stream, str):
+        stream = StringIO(stream)
+
+    msg = None
+    window = deque()
+    window.extend(stream.read(win_sz))
+    buffer = stream.read(buf_sz)
+    while buffer:
+        for char in buffer:
+            msg = yield window, char
+            window.popleft()
+            window.append(char)
+            if msg:
+                if issubclass(msg, StopIteration):
+                    break
+
+        if msg:
+            if msg is StopIteration:
+                break
+            if msg is ResetIteration:
+                window.__init__(stream.read(win_sz))
+        buffer = stream.read(buf_sz)
+
+
+def sequences_fp(stream, seq_len, **kwargs):
+    gen = windowed_chars_fp(stream, **kwargs)
+    next(gen)
+    while True:
+        x, y = zip(*iter_n(gen, seq_len))
+        if len(y) != seq_len:
+            break
+        msg = yield np.array(x), np.array(y)
+        if msg:
+            gen.send(msg)
+
+
+def batches_fp(stream, batch_sz, **kwargs):
+    gen = sequences_fp(stream, **kwargs)
+    next(gen)
+    while True:
+        x, y = zip(*iter_n(gen, batch_sz))
+        if len(x) != batch_sz:
+            break
+        msg = yield np.array(x), np.array(y)
+        if msg:
+            gen.send(msg)
 
 
 class StreamSplitter(object):

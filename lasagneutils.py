@@ -1,4 +1,5 @@
-from datagen import windowed_chars, windowed_vectors, batch_gen, batch_gen_sliding, CharMap
+from datagen import windowed_chars, windowed_vectors, batch_gen, \
+    batch_gen_sliding, CharMap, BatchGeneratorBuffer
 import lasagne as L
 from theano import tensor as T
 import theano
@@ -20,6 +21,7 @@ from _pyio import BytesIO, TextIOBase, TextIOWrapper, BufferedIOBase, BufferedRa
     IncrementalNewlineDecoder
 from threading import Lock
 import codecs
+from functools import wraps
 
 class ProgressBar(_ProgressBar):
     @property
@@ -70,6 +72,7 @@ class LasagneModel(object):
         self.l_out, self.f_train, self.f_cost, self.f_predict, self.opt = self.model_generator(opt)
         self.aux = OrderedDict(aux)if aux else OrderedDict()
         self.err_data_handler = lambda err: None
+        self.pbar = ProgressBar
         if 'train_error' not in self.aux:
             self.aux['train_error'] = list()
 
@@ -82,53 +85,31 @@ class LasagneModel(object):
         opt.update(**opt_changes)
         self.l_out, self.f_train, self.f_cost, self.f_predict, self.opt = self.model_generator(opt)
 
-    def _get_max_batches(self, fp):
-        for i, batch in enumerate(self.batch_generator(fp=fp, **self.opt)):
-            pass
-        fp.seek(0)
-        return i
+    def _iterate_func(self, batch_gen: BatchGeneratorBuffer, func,
+                      update_interval=10, pbar_cls=None):
+        try:
+            for i, (x, y) in enumerate(batch_gen.batches(self.opt, pbar_cls=pbar_cls)):
+                err = func(x, y)
+                self.err_data_handler(err)
+                if i % update_interval == 0:
+                    print('{0} Error: {1:2.3f}'.format(batch_gen.c, float(err)))
 
-    class DummyProgressBar(object):
-        def __init__(self):
-            self.value = 0
+        except KeyboardInterrupt:
+            print('Recieved interrupt...')
+            print('Batch worker terminated')
 
-        def start(self):
-            pass
+    @wraps(_iterate_func)
+    def train(self, *args, **kwargs):
+        self._iterate_func(self._train_func,  *args, **kwargs)
 
-        def __next__(self):
-            pass
-
-        def __iter__(self):
-            return self
-
-        def __call__(self, it):
-            return it
-
-    @staticmethod
-    def batch_getter(batch_q, msg_q, status_printer):
-
-        def getnprint():
-            while True:
-                while not msg_q.empty():
-                    status_printer(msg_q.get())
-                try:
-                    return batch_q.get(timeout=1)
-                except Empty:
-                    pass
-
-        batch = getnprint()
-        while batch is not StopIteration:
-            yield batch
-            batch = getnprint()
-
-    def train(self, fp, pbar_cls=ProgressBar, status_printer=print, update_interval=10, max_batches=None):
-        self._iterate_func(self._train_func, fp, pbar_cls, status_printer, update_interval, max_batches)
-
-    def test(self, fp, pbar_cls=ProgressBar, status_printer=print, update_interval=10, max_batches=None):
+    @wraps(_iterate_func)
+    def test(self, *args, **kwargs):
         sweeps = self.opt.sweeps
         self.opt.sweeps = 1
-        self._iterate_func(self._test_func, fp, pbar_cls, status_printer, update_interval, max_batches)
-        self.opt.sweeps = sweeps
+        try:
+            self._iterate_func(self._test_func, *args, **kwargs)
+        finally:
+            self.opt.sweeps = sweeps
 
     def _test_func(self, x, y):
         err = self.f_cost(x, y)
@@ -139,74 +120,6 @@ class LasagneModel(object):
         err = self.f_train(x, y)
         self.aux['train_error'].append(err)
         return err
-
-    def _iterate_func(self, func, fp, pbar_cls=ProgressBar, status_printer=print, update_interval=10, max_batches=None):
-        batch_q = Queue(2)
-        msg_q = Queue()
-
-        def batch_worker(opt, batch_generator):
-            t_start = time()
-
-            def log(msg):
-                msg_q.put('BW - {0:3.0f}:\t{1}'.format(time()-t_start, msg))
-            try:
-                log('started...')
-                opt = Options(opt)
-                if opt.get('sweeps', None) is None:
-                    test = lambda i: True
-                else:
-                    sweeps = opt['sweeps']
-                    test = lambda i: i <= sweeps
-                sweep = 1
-                while test(sweep):
-                    log('started sweep {0}'.format(sweep))
-                    fp.seek(0)
-                    for i, (x, y) in enumerate(batch_generator(**self.opt, fp=fp)):
-                        batch_q.put((x, y, i, sweep))
-                    sweep += 1
-            except Exception as e:
-                log('Exception ocurred: {0}'.format(e))
-                batch_q.put(StopIteration)
-                raise e
-
-            log('shutting down')
-            batch_q.put(StopIteration)
-
-
-        if pbar_cls is None:
-            pb = self.DummyProgressBar()
-        else:
-            status_printer('Getting max batches')
-            max_batches = max_batches or self._get_max_batches(fp)
-            status_printer(str(max_batches))
-            if self.opt.get('sweeps', None) is not None:
-                pb = pbar_cls(max_batches * self.opt.sweeps)
-
-                def pb_update(i, sweep):
-                    pb.value = i + (sweep - 1) * max_batches
-            else:
-                pb = pbar_cls(max_batches)
-
-                def pb_update(i, sweep):
-                    pb.value = i % max_batches
-
-        pb.start()
-        status_printer('Starting batch worker')
-        p = Process(target=batch_worker, args=(dict(self.opt), self.batch_generator))
-        p.start()
-
-        try:
-            for x, y, i, sweep in self.batch_getter(batch_q, msg_q, status_printer):
-                err = func(x, y)
-                self.err_data_handler(err)
-                if i % update_interval == 0:
-                    pb_update(i, sweep)
-                    status_printer('sweep {0}, Error: {1:2.3f}'.format(sweep, float(err)))
-
-        except KeyboardInterrupt:
-            status_printer('Recieved interrupt...')
-            p.terminate()
-            status_printer('Batch worker terminated')
 
     def save_model(self, file):
         data = dict(params=L.layers.get_all_param_values(self.l_out),
