@@ -130,5 +130,6 @@ target/
 
 .idea/*
 rnn-speciale.iml
-*-git
+*-git/
+*.git/
 qsubs
