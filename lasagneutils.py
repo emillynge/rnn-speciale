@@ -54,7 +54,7 @@ def make_model(opt):
     target_values = T.tensor3('target_output') # batch_sz, seq_len, n_classes
 
 
-    cost = T.nnet.categorical_crossentropy(network_output, target_values.reshape((-1, CharMap.max_i))).mean()
+    cost = T.nnet.categorical_crossentropy(network_output, target_values.reshape2xy_batch_chunk((-1, CharMap.max_i))).mean()
     updates = L.updates.adagrad(cost, all_params, .01)
     f_train = theano.function([l_in.input_var, target_values], cost, updates=updates, allow_input_downcast=True)
     f_compute_cost = theano.function([l_in.input_var, target_values], cost, allow_input_downcast=True)
