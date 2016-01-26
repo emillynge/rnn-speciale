@@ -1,4 +1,8 @@
-from ipywidgets import (FloatProgress, FloatSlider, Text, Textarea, interact, interactive, fixed)
+import re
+from contextlib import contextmanager, redirect_stdout, redirect_stderr
+
+from ipywidgets import (FloatProgress, FloatSlider, Text, Textarea, interact, interactive, fixed,
+                        HBox)
 from IPython.display import (clear_output, display, HTML)
 from lasagneutils import Options
 from collections import OrderedDict, deque
@@ -138,22 +142,50 @@ class JupyterOptions(Options):
         self.show_args(**self)
 
 
-class ProgressPrinter(Textarea):
+class _ProgressPrinter(Textarea):
+    strip = re.compile('(^[ \n]+)|([ \n]+$)')
     def __init__(self, startup_text='', max_lines=5):
         super().__init__(disabled=True)
         self._lines = deque()
         self.value = ''
         self.max_lines = max_lines
         self(startup_text)
-        display(self)
 
     def __call__(self, new_text):
+        if not new_text:
+            return
         self._lines.append(new_text)
         if len(self._lines) > self.max_lines:
             self._lines.popleft()
 
         self.value = '\n'.join(self._lines)
 
+    def write(self, s):
+        self(self.strip.sub('', s))
+
+    def flush(self):
+        pass
+
+    def __del__(self):
+        super().__del__()
+
+
+class ProgressPrinter(_ProgressPrinter):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        display(self)
+
     def __del__(self):
         self.visible = False
         super().__del__()
+
+
+@contextmanager
+def console_out(max_lines=5):
+    perr = _ProgressPrinter(max_lines=max_lines)
+    pout =_ProgressPrinter(max_lines=max_lines)
+    console = HBox([pout, perr])
+    display(console)
+    with redirect_stdout(pout):
+        with redirect_stderr(perr):
+            yield None
