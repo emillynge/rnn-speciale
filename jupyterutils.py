@@ -1,6 +1,8 @@
 import re
 from contextlib import contextmanager, redirect_stdout, redirect_stderr
 
+import progressbar
+import sys
 from ipywidgets import (FloatProgress, FloatSlider, Text, Textarea, interact, interactive, fixed,
                         HBox)
 from IPython.display import (clear_output, display, HTML)
@@ -189,3 +191,45 @@ def console_out(max_lines=5):
     with redirect_stdout(pout):
         with redirect_stderr(perr):
             yield None
+
+
+class Bar(progressbar.Widget):
+    __slots__ = ('ipywidget')
+
+    def __init__(self):
+        self.ipywidget = FloatProgress(min=0, max=100)
+        self.ipywidget.value = 0
+        display(self.ipywidget)
+
+    def update(self, pb):
+        self.ipywidget.value = int(pb.currval / float(pb.maxval) * 100) if pb.maxval else 0
+        return ''
+
+
+class Message(progressbar.Widget):
+    'Returns progress as a count of the total (e.g.: "5 of 47")'
+
+    __slots__ = ('message', 'fmt', 'max_width')
+
+    def __init__(self, message, max_width=None):
+        self.message = message
+        self.max_width = max(max_width or len(message), 1)
+        self.fmt = ' {:' + str(self.max_width) + '} '
+
+    def update(self, pbar):
+        return self.fmt.format(self.message[:self.max_width])
+
+class ProgressBar2(progressbar.ProgressBar):
+    def test__iter__(self):
+        with console_out():
+            self.fd = sys.stderr
+            while True:
+                yield next(self)
+
+
+def pbar(what, max_val, *args):
+    msg = Message(*args)
+    return ProgressBar2(max_val, fd=sys.stderr,
+                       widgets=[progressbar.SimpleProgress(), ' ',
+                                what, msg, progressbar.Percentage(),
+                                Bar()]), msg

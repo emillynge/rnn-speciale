@@ -3,3 +3,8 @@ Pyro4
 boltons
 pytest
 Mako
+GitPython
+git+https://github.com/emillynge/python-metaclasses#egg=elymetaclasses
+bokeh
+progressbar33
+numpy>=1.10
