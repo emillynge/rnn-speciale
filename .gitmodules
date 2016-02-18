@@ -1,7 +1,4 @@
 [submodule "Theano"]
 	path = Theano-git
-	url = git://github.com/Theano/Theano.git
-[submodule "pycuda"]
-	path = pycuda.git
-	url = http://git.tiker.net/trees/pycuda.git
+	url = https://github.com/emillynge/Theano.git
 	branch = master
