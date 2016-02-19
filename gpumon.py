@@ -13,7 +13,7 @@ from collections import namedtuple, deque, defaultdict, \
 from operator import itemgetter
 from subprocess import Popen, PIPE
 from typing import List
-
+import logging
 from decorator import contextmanager
 
 # pip
@@ -34,6 +34,8 @@ from bokeh.client import push_session
 from bokeh.io import curdoc
 from bokeh.palettes import RdYlGn5, RdYlGn7
 
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 class AsyncProcWrapper:
     def __init__(self, *args, **kwargs):
@@ -528,10 +530,11 @@ TextStdErr = namedtuple('TextStdErr', 'text')
 
 
 class ChangeStream(asyncio.Queue):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, source_fun=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.sentinel2waiters = defaultdict(list)
         self.terminated = False
+        self.source_fun = source_fun or (lambda source: None)
 
     class BytesRedirecter:
         def __init__(self, change_stream: asyncio.Queue, copy_out,
@@ -637,18 +640,19 @@ class ChangeStream(asyncio.Queue):
     async def start(self):
         while not self.terminated:
             change = await self.get()
+            logger.debug(change)
             #print(change)
             for sentinel, waiters in self.sentinel2waiters.items():
                 if isinstance(change, sentinel):
                     dead_waiters = list()
                     for waiter in waiters:
                         try:
-                            waiter.send(change)
+                            source = waiter.send(change)
+                            self.source_fun(source)
                         except StopIteration:
                             dead_waiters.append(waiter)
                     for waiter in dead_waiters:
                         waiters.remove(waiter)
-
 
 @contextmanager
 def redirect_to_changestream(change_stream: asyncio.Queue, err=False):
@@ -725,7 +729,7 @@ class BokehPlots:
                 loads = list(source.data['load'])
                 loads[change.dev] = change.load
                 source.data['load'] = loads
-                change = yield
+                change = yield source
 
         return p
 
@@ -744,7 +748,7 @@ class BokehPlots:
             while not self.terminated:
                 self._drop_in(source.data, 'load', change.dev, change.load)
                 self._drop_in(source.data, 'free', change.dev, change.free)
-                change = yield
+                change = yield source
 
         self.change_consumer.register_waiter(waiter())
 
@@ -832,7 +836,7 @@ class BokehPlots:
                 owners = list(users.keys())
                 if name_range.factors != owners:
                     name_range.factors = owners
-                change = yield
+                change = yield source
 
         return p
 
@@ -848,11 +852,11 @@ class BokehPlots:
             if hasattr(sentinel, 'bytes'):
                 while not self.terminated:
                     console.output_text(change.bytes.decode())
-                    change = yield
+                    change = yield console.source
             else:
                 while not self.terminated:
                     console.output_text(change.text)
-                    change = yield
+                    change = yield console.source
 
         if stdout:
             c = BokehConsole(**console_kwargs)
@@ -903,7 +907,7 @@ class BokehPlots:
                 if state2color[change.state] != source.data['color'][idx]:
                     self._drop_in(source.data, 'color', idx,
                                   state2color[change.state])
-                change = yield
+                change = yield source
 
         return p
 
@@ -1103,6 +1107,46 @@ TEMPLATE = """
 {script}
     </body>
 </html>"""
+
+from bokeh.io import push_notebook
+
+
+def update_notebook_source(source: ColumnDataSource):
+    if source:
+        push_notebook()
+
+
+def notebook(*tunnels):
+    from bokeh.io import show
+    execs = dict()
+    if tunnels:
+        for tunnel in tunnels:
+            t_args = re.findall('([\'"]([^"\']+)["\'])|([^ ]+)', tunnel)
+            t_args = [a[-1] if a[-1] else a[-1] for a in t_args]
+            t_args = [a.strip(' ') for a in t_args]
+            execs['_'.join(t_args)] = make_ssh_subprocess(*t_args)
+    else:
+        execs['localhost'] = async_subprocess, Popen
+
+    _hplots = list()
+    monitors = list()
+    change_streams = list()
+    for ex in execs.values():
+        changes = ChangeStream(source_fun=update_notebook_source)
+        mon = RessourceMonitor(changes, async_exec=ex[0], normal_exec=ex[1])
+        plot_gen = BokehPlots(changes, async_exec=ex[0], normal_exec=ex[1])
+        _hplots.append(vplot(plot_gen.cpu_bars(False), plot_gen.gpu_bars(),
+                             plot_gen.user_total_memusage()))
+        monitors.append(mon)
+        change_streams.append(changes)
+    plots = hplot(*_hplots)
+    show(plots)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(asyncio.gather(
+        *(mon.gpus_mon(loop=loop) for mon in monitors),
+        *(mon.cpus_mon() for mon in monitors),
+        *(changes.start() for changes in change_streams)
+    ))
 
 if __name__ == "__main__":
     from argparse import ArgumentParser
